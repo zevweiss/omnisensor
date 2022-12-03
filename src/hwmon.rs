@@ -185,13 +185,16 @@ fn name_for_label(label: &str) -> &str {
 }
 
 pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
+			    dbuspaths: &FilterSet<dbus::Path<'_>>,
 			    i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
-	for fullcfg in cfg.values() {
-		let sensorcfg = match fullcfg.as_ref() {
-			SensorConfig::Hwmon(c) => c,
-			_ => continue,
-		};
-
+	let configs = cfg.iter()
+		.filter_map(|(path, arccfg)| {
+			match arccfg.as_ref() {
+				SensorConfig::Hwmon(cfg) if dbuspaths.contains(path) => Some((arccfg, cfg)),
+				_ => None,
+			}
+		});
+	for (arccfg, sensorcfg) in configs {
 		let mainname = &sensorcfg.names[0];
 
 		if !sensorcfg.power_state.active_now().await {
@@ -353,7 +356,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 				},
 			};
 
-			let sensor = Sensor::new(fullcfg.clone(), &sensorname, file.kind, fd)
+			let sensor = Sensor::new(arccfg.clone(), &sensorname, file.kind, fd)
 				.with_poll_interval(sensorcfg.poll_interval)
 				.with_i2cdev(i2cdev.clone())
 				.with_power_state(sensorcfg.power_state);

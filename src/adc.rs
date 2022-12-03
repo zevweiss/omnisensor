@@ -6,7 +6,7 @@ use std::{
 use dbus;
 
 use crate::{
-	ErrResult,
+	types::{ErrResult, FilterSet},
 	gpio::{BridgeGPIOConfig, BridgeGPIO},
 	powerstate::PowerState,
 	sensor,
@@ -79,14 +79,16 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 	Ok(paths)
 }
 
-pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap) ->ErrResult<()> {
+pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap, dbuspaths: &FilterSet<dbus::Path<'_>>) ->ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
-	for fullcfg in cfg.values() {
-		let sensorcfg = match fullcfg.as_ref() {
-			SensorConfig::ADC(c) => c,
-			_ => continue,
-		};
-
+	let configs = cfgmap.iter()
+		.filter_map(|(path, arccfg)| {
+			match arccfg.as_ref() {
+				SensorConfig::ADC(cfg) if dbuspaths.contains(path) => Some((arccfg, cfg)),
+				_ => None,
+			}
+		});
+	for (arccfg, sensorcfg) in configs {
 		if sensorcfg.index >= adcpaths.len() as u64 {
 			eprintln!("{} ignored, no corresponding file found",
 				  sensorcfg.name);
@@ -126,7 +128,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 			},
 		};
 
-		let sensor = Sensor::new(fullcfg.clone(), &sensorcfg.name, SensorType::Voltage, fd)
+		let sensor = Sensor::new(arccfg.clone(), &sensorcfg.name, SensorType::Voltage, fd)
 			.with_poll_interval(sensorcfg.poll_interval)
 			.with_scale(sensorcfg.scale)
 			.with_bridge_gpio(bridge_gpio)

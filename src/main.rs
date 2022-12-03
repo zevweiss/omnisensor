@@ -1,5 +1,5 @@
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	sync::Arc,
 	time::Duration,
 };
@@ -25,7 +25,7 @@ mod i2c;
 mod gpio;
 mod powerstate;
 
-use types::ErrResult;
+use types::{ErrResult, FilterSet};
 use sensor::{
 	DBusSensor,
 	DBusSensorMap,
@@ -111,6 +111,31 @@ async fn deactivate_sensors(sensors: &mut DBusSensorMap) {
 	}
 }
 
+async fn register_properties_changed_handler<H, R>(bus: &nonblock::SyncConnection, cb: H) -> ErrResult<nonblock::MsgMatch>
+	where H: Fn(dbus::message::Message, String, dbus::arg::PropMap) -> R + Send + Copy + Sync + 'static,
+	      R: futures::Future<Output = ()> + Send
+{
+	use dbus::message::SignalArgs;
+	use nonblock::stdintf::org_freedesktop_dbus::PropertiesPropertiesChanged as PPC;
+	use futures::StreamExt;
+
+	let rule = MatchRule::new_signal(PPC::INTERFACE, PPC::NAME)
+		.with_namespaced_path("/xyz/openbmc_project/inventory");
+	let (signal, stream) = bus.add_match(rule).await?.stream();
+	let stream = stream.for_each(move |(msg, (intf, props)): (_, (String, dbus::arg::PropMap))| async move {
+		// until dbus-rs supports arg0namespace as a MatchRule
+		// parameter, do it manually here...
+		if !intf.starts_with("xyz.openbmc_project.Configuration.") {
+			return;
+		}
+		tokio::spawn(async move { cb(msg, intf, props).await });
+	});
+
+	tokio::spawn(async { stream.await });
+
+	Ok(signal)
+}
+
 #[tokio::main]
 async fn main() -> ErrResult<()> {
 	let (sysbus_resource, sysbus) = connection::new_system_sync()?;
@@ -162,8 +187,8 @@ async fn main() -> ErrResult<()> {
 
 	let mut sensors = HashMap::new();
 	let mut i2cdevs = i2c::I2CDeviceMap::new();
-	adc::update_sensors(&cfg, &mut sensors).await?;
-	hwmon::update_sensors(&cfg, &mut sensors, &mut i2cdevs).await?;
+	adc::update_sensors(&cfg, &mut sensors, &FilterSet::All).await?;
+	hwmon::update_sensors(&cfg, &mut sensors, &FilterSet::All, &mut i2cdevs).await?;
 
 	cr.insert("/xyz", &[], ());
 	cr.insert("/xyz/openbmc_project", &[], ());
@@ -200,21 +225,20 @@ async fn main() -> ErrResult<()> {
 	let refcfg = globalize(cfg);
 	let refi2cdevs = globalize(i2cdevs);
 
-	let handler = move |kind, newstate: bool| async move {
+	let powerhandler = move |kind, newstate| async move {
 		eprintln!("got a power signal: {:?} -> {}", kind, newstate);
 		let mut sensors = refsensors.lock().await;
 		let cfg = refcfg.lock().await;
 
 		if newstate {
-			adc::update_sensors(&cfg, &mut sensors).await
+			adc::update_sensors(&cfg, &mut sensors, &FilterSet::All).await
 				.unwrap_or_else(|e| {
 					eprintln!("ADC sensor update failed: {}", e);
 				});
 
 			let mut i2cdevs = refi2cdevs.lock().await;
 
-			// FIXME: dedupe error handling w/ above?
-			hwmon::update_sensors(&cfg, &mut sensors, &mut i2cdevs).await
+			hwmon::update_sensors(&cfg, &mut sensors, &FilterSet::All, &mut i2cdevs).await
 				.unwrap_or_else(|e| {
 					eprintln!("Hwmon sensor update failed: {}", e);
 				});
@@ -224,7 +248,67 @@ async fn main() -> ErrResult<()> {
 		eprintln!("[{:?}] signal handler done.", kind);
 	};
 
-	let _signals = powerstate::register_power_signal_handler(&sysbus, handler).await?;
+	let _powersignals = powerstate::register_power_signal_handler(&sysbus, powerhandler).await?;
+
+	#[allow(non_upper_case_globals)]
+	static changed_paths: Mutex<Option<HashSet<dbus::Path>>> = Mutex::const_new(None);
+
+	let prophandler = move |msg: dbus::message::Message, _, _| async move {
+		let path = match msg.path() {
+			Some(p) => p.into_static(),
+			_ => return,
+		};
+
+		{
+			let mut paths = changed_paths.lock().await;
+			if let Some(ref mut set) = &mut *paths {
+				// if it was already Some(_), piggyback on the
+				// signal that set it that way
+				set.insert(path);
+				return;
+			}
+
+			*paths = Some([path].into_iter().collect());
+		}
+
+		tokio::time::sleep(Duration::from_secs(2)).await;
+
+		let mut paths = changed_paths.lock().await;
+		let mut sensors = refsensors.lock().await;
+		let mut cfg = refcfg.lock().await;
+
+		let filter: FilterSet<_> = if paths.is_some() {
+			paths.take().into()
+		} else {
+			// This should be impossible, but try to lessen the
+			// impact if it somehow happens...
+			eprintln!("BUG: changed_paths vanished out from under us!");
+			return;
+		};
+
+		*cfg = match get_config(&sysbus).await {
+			Ok(c) => c,
+			Err(e) => {
+				eprintln!("Failed to retrieve sensor configs, ignoring PropertiesChanged: {}", e);
+				return;
+			},
+		};
+
+		// FIXME: dedupe w/ similar code in powerhandler
+		adc::update_sensors(&cfg, &mut sensors, &filter).await
+			.unwrap_or_else(|e| {
+				eprintln!("ADC sensor update failed: {}", e);
+			});
+
+		let mut i2cdevs = refi2cdevs.lock().await;
+
+		hwmon::update_sensors(&cfg, &mut sensors, &filter, &mut i2cdevs).await
+			.unwrap_or_else(|e| {
+				eprintln!("Hwmon sensor update failed: {}", e);
+			});
+	};
+
+	let _propsignals = register_properties_changed_handler(&sysbus, prophandler).await?;
 
 	println!("Hello, world!");
 

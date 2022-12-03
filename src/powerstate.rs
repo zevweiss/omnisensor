@@ -174,7 +174,7 @@ pub async fn register_power_signal_handler<F, R>(bus: &nonblock::SyncConnection,
 				(prop.update)(hoststate, newstate);
 			}
 
-			cb(prop.power_state, newstate).await;
+			tokio::spawn(async move { cb(prop.power_state, newstate).await });
 		});
 		signals.push(signal);
 		tokio::spawn(async { stream.await });

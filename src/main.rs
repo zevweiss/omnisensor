@@ -190,12 +190,15 @@ async fn main() -> ErrResult<()> {
 		true
 	}));
 
+	fn globalize<T>(x: T) -> &'static Mutex<T> {
+		Box::leak(Box::new(Mutex::new(x)))
+	}
 	// HACK: leak these into a pseudo-globals (to satisfy callback
 	// lifetime requirements).  Once const HashMap::new() is
 	// stable we can switch these to be real globals instead.
-	let refsensors: &Mutex<_> = Box::leak(Box::new(Mutex::new(sensors)));
-	let refcfg: &Mutex<_> = Box::leak(Box::new(Mutex::new(cfg)));
-	let refi2cdevs: &Mutex<_> = Box::leak(Box::new(Mutex::new(i2cdevs)));
+	let refsensors = globalize(sensors);
+	let refcfg = globalize(cfg);
+	let refi2cdevs = globalize(i2cdevs);
 
 	let handler = move |kind, newstate: bool| async move {
 		eprintln!("got a power signal: {:?} -> {}", kind, newstate);

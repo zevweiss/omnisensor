@@ -184,8 +184,8 @@ fn name_for_label(label: &str) -> &str {
 	}
 }
 
-pub async fn update_hwmon_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
-				  i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
+pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
+			    i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
 	for fullcfg in cfg.values() {
 		let sensorcfg = match fullcfg.as_ref() {
 			SensorConfig::Hwmon(c) => c,

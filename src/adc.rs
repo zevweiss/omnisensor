@@ -62,7 +62,7 @@ const IIO_HWMON_PATH: &'static str = "/sys/devices/platform/iio-hwmon";
 
 // Returns a Vec of ... ordered by index (inX_input, E-M config
 // "Index" key)
-pub fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
+fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 	let devdir = match sensor::get_single_hwmon_dir(IIO_HWMON_PATH)? {
 		Some(d) => d,
 		None => return Ok(vec![]),
@@ -79,7 +79,7 @@ pub fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 	Ok(paths)
 }
 
-pub async fn update_adc_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap) ->ErrResult<()> {
+pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap) ->ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
 	for fullcfg in cfg.values() {
 		let sensorcfg = match fullcfg.as_ref() {

@@ -162,8 +162,8 @@ async fn main() -> ErrResult<()> {
 
 	let mut sensors = HashMap::new();
 	let mut i2cdevs = i2c::I2CDeviceMap::new();
-	adc::update_adc_sensors(&cfg, &mut sensors).await?;
-	hwmon::update_hwmon_sensors(&cfg, &mut sensors, &mut i2cdevs).await?;
+	adc::update_sensors(&cfg, &mut sensors).await?;
+	hwmon::update_sensors(&cfg, &mut sensors, &mut i2cdevs).await?;
 
 	cr.insert("/xyz", &[], ());
 	cr.insert("/xyz/openbmc_project", &[], ());
@@ -206,7 +206,7 @@ async fn main() -> ErrResult<()> {
 		let cfg = refcfg.lock().await;
 
 		if newstate {
-			adc::update_adc_sensors(&cfg, &mut sensors).await
+			adc::update_sensors(&cfg, &mut sensors).await
 				.unwrap_or_else(|e| {
 					eprintln!("ADC sensor update failed: {}", e);
 				});
@@ -214,7 +214,7 @@ async fn main() -> ErrResult<()> {
 			let mut i2cdevs = refi2cdevs.lock().await;
 
 			// FIXME: dedupe error handling w/ above?
-			hwmon::update_hwmon_sensors(&cfg, &mut sensors, &mut i2cdevs).await
+			hwmon::update_sensors(&cfg, &mut sensors, &mut i2cdevs).await
 				.unwrap_or_else(|e| {
 					eprintln!("Hwmon sensor update failed: {}", e);
 				});

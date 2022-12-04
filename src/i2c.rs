@@ -6,7 +6,7 @@ use std::{
 use dbus::arg::{Variant, RefArg};
 use phf::phf_map;
 
-use crate::ErrResult;
+use crate::types::ErrResult;
 
 // Functionally this could be simplified to a set (perhaps even with
 // membership implying false instead of true to keep it smaller), but

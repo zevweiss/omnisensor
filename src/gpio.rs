@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 use dbus::arg::{Variant, RefArg};
 use gpiocdev;
 
-use crate::ErrResult;
+use crate::types::ErrResult;
 
 #[derive(Debug, Copy, Clone)]
 enum Polarity {

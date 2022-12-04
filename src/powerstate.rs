@@ -7,7 +7,7 @@ use dbus::{
 };
 use tokio::sync::Mutex;
 
-use crate::ErrResult;
+use crate::types::ErrResult;
 
 #[derive(Debug, Copy, Clone)]
 pub enum PowerState {

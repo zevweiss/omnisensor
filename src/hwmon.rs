@@ -7,6 +7,7 @@ use glob;
 use phf::phf_set;
 
 use crate::{
+	types::{ErrResult, FilterSet},
 	i2c::{
 		I2CDeviceParams,
 		I2CDeviceMap,
@@ -22,8 +23,6 @@ use crate::{
 		SensorType,
 	},
 };
-
-use crate::{ErrResult, FilterSet};
 
 #[derive(Debug)]
 pub struct HwmonSensorConfig {

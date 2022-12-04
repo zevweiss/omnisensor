@@ -23,7 +23,7 @@ use crate::{
 	},
 };
 
-use crate::ErrResult;
+use crate::{ErrResult, FilterSet};
 
 #[derive(Debug)]
 pub struct HwmonSensorConfig {
@@ -32,7 +32,7 @@ pub struct HwmonSensorConfig {
 	i2c: I2CDeviceParams,
 	poll_interval: Duration,
 	power_state: PowerState,
-	enabled_labels: Option<HashSet<String>>,
+	enabled_labels: FilterSet<String>,
 }
 
 static PSU_TYPES: phf::Set<&'static str> = phf_set! {
@@ -105,8 +105,9 @@ impl HwmonSensorConfig {
 			}
 		}
 		let i2c = I2CDeviceParams::from_dbus(basecfg, &r#type).ok()??;
-		let enabled_labels: Option<HashSet<String>> = prop_cast(basecfg, "Labels")
-			.map(|v: &Vec<_>| HashSet::from_iter(v.iter().cloned()));
+		let enabled_labels: FilterSet<String> = prop_cast(basecfg, "Labels")
+			.map(|v: &Vec<_>| HashSet::from_iter(v.iter().cloned()))
+			.into();
 
 		for (key, value) in basecfg {
 			if let Some(lbl) = key.strip_suffix("_Name") {
@@ -328,8 +329,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 				file.base.to_string()
 			};
 
-			// skip if we've got an explicit list of enable labels and this isn't in it
-			if !sensorcfg.enabled_labels.as_ref().map(|s| s.contains(&label)).unwrap_or(true) {
+			if !sensorcfg.enabled_labels.contains(&label) {
 				continue;
 			}
 

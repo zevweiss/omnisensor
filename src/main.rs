@@ -29,6 +29,7 @@ use types::{ErrResult, FilterSet};
 use sensor::{
 	DBusSensor,
 	DBusSensorMap,
+	DBusSensorState,
 	SensorConfig,
 	SensorConfigMap,
 };
@@ -93,9 +94,9 @@ async fn deactivate_sensors(sensors: &mut DBusSensorMap) {
 	for (name, dbs) in sensors.iter_mut() {
 		let dbs = &mut *dbs.lock().await;
 		let new = {
-			let arcsensor = match dbs {
-				DBusSensor::Active(s) => s,
-				DBusSensor::Phantom(_) => continue,
+			let arcsensor = match &dbs.state {
+				DBusSensorState::Active(s) => s,
+				DBusSensorState::Phantom(_) => continue,
 			};
 			let sensor = arcsensor.lock().await;
 			if sensor.active_now().await {
@@ -171,9 +172,9 @@ async fn main() -> ErrResult<()> {
 			.get_async(|mut ctx, dbs| {
 				let dbs = dbs.clone();
 				async move {
-					let x = match &*dbs.lock().await {
-						DBusSensor::Active(s) => s.lock().await.cache,
-						DBusSensor::Phantom(_) => f64::NAN,
+					let x = match &dbs.lock().await.state {
+						DBusSensorState::Active(s) => s.lock().await.cache,
+						DBusSensorState::Phantom(_) => f64::NAN,
 					};
 					ctx.reply(Ok(x))
 				}
@@ -198,9 +199,9 @@ async fn main() -> ErrResult<()> {
 
 	for (name, dbs) in &sensors {
 		let inner = dbs.lock().await;
-		let s = match *inner {
-			DBusSensor::Active(ref s) => s.lock().await,
-			DBusSensor::Phantom(_) => {
+		let s = match inner.state {
+			DBusSensorState::Active(ref s) => s.lock().await,
+			DBusSensorState::Phantom(_) => {
 				eprintln!("{}: phantom sensor during initialization?", name);
 				continue;
 			},

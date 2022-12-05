@@ -193,9 +193,11 @@ impl Sensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
 	pub fn deactivate(&self) -> DBusSensor {
-		DBusSensor::Phantom(PhantomSensor {
-			kind: self.kind,
-		})
+		DBusSensor {
+			state: DBusSensorState::Phantom(PhantomSensor {
+				kind: self.kind,
+			}),
+		}
 	}
 }
 
@@ -228,9 +230,13 @@ impl PhantomSensor {
 // A Sensor wrapper that persists for dbus purposes even if the
 // underlying ("real") sensor goes away (e.g. if it's PowerState::On
 // and the host gets shut off).
-pub enum DBusSensor {
+pub enum DBusSensorState {
 	Active(Arc<Mutex<Sensor>>),
 	Phantom(PhantomSensor),
+}
+
+pub struct DBusSensor {
+	pub state: DBusSensorState,
 }
 
 // Maps sensor names to DBusSensors
@@ -239,7 +245,9 @@ type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<
 
 impl DBusSensor {
 	pub async fn new(sensor: Sensor) -> Self {
-		Self::Active(sensor.start_updates().await)
+		Self {
+			state: DBusSensorState::Active(sensor.start_updates().await),
+		}
 	}
 
 	pub fn replace(&mut self, new: DBusSensor) {
@@ -247,9 +255,9 @@ impl DBusSensor {
 	}
 
 	pub async fn kind(&self) -> SensorType {
-		match self {
-			Self::Active(s) => s.lock().await.kind,
-			Self::Phantom(p) => p.kind,
+		match &self.state {
+			DBusSensorState::Active(s) => s.lock().await.kind,
+			DBusSensorState::Phantom(p) => p.kind,
 		}
 	}
 }
@@ -298,7 +306,7 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut DBusSensorMap, key: String
 {
 	let entry = sensors.entry(key);
 	if let DBusSensorMapEntry::Occupied(ref e) = entry {
-		if let DBusSensor::Active(_) = *e.get().lock().await {
+		if let DBusSensorState::Active(_) = e.get().lock().await.state {
 			return None;
 		}
 	}
@@ -316,9 +324,9 @@ pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, sensor: Sensor) -
 		DBusSensorMapEntry::Occupied(ref mut e) => {
 			let new = {
 				let dbs = e.get().lock().await;
-				match &*dbs {
-					DBusSensor::Phantom(p) => Arc::new(Mutex::new(p.activate(sensor).await)),
-					DBusSensor::Active(_) =>  return None,
+				match &dbs.state {
+					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(sensor).await)),
+					DBusSensorState::Active(_) =>  return None,
 				}
 			};
 			e.insert(new);

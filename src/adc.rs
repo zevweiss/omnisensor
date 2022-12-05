@@ -3,10 +3,9 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
-use dbus;
 
 use crate::{
-	types::{ErrResult, FilterSet},
+	types::*,
 	gpio::{BridgeGPIOConfig, BridgeGPIO},
 	powerstate::PowerState,
 	sensor,
@@ -79,7 +78,9 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 	Ok(paths)
 }
 
-pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap, dbuspaths: &FilterSet<dbus::Path<'_>>) ->ErrResult<()> {
+pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
+			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>)
+			    -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
 	let configs = cfgmap.iter()
 		.filter_map(|(path, arccfg)| {
@@ -135,7 +136,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSens
 			.with_power_state(sensorcfg.power_state);
 
 		// .expect() because we checked for Occupied(Active(_)) earlier
-		sensor::install_sensor(entry, dbuspath.clone(), sensor).await
+		sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await
 			.expect("sensor magically reactivated?");
 	}
 	Ok(())

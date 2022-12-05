@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use glob;
 
 use crate::{
-	ErrResult,
+	types::*,
 	adc::ADCSensorConfig,
 	hwmon::HwmonSensorConfig,
 	i2c::I2CDevice,
@@ -79,6 +79,19 @@ pub enum SensorConfig {
 
 pub type SensorConfigMap<'a> = HashMap<dbus::Path<'a>, Arc<SensorConfig>>;
 
+// FIXME: this "should" just be a closure, but I ran out of patience
+// trying to get my attempts at it past the borrow checker...
+struct ValueChangeNotifier {
+	dbuspath: dbus::Path<'static>,
+	sendmsgfn: SendValueChangeFn,
+}
+
+impl ValueChangeNotifier {
+	async fn send(&self, old: f64, new: f64) {
+		self.sendmsgfn.lock().await(&self.dbuspath, old, new);
+	}
+}
+
 pub struct Sensor {
 	cfg: Arc<SensorConfig>,
 
@@ -101,6 +114,7 @@ pub struct Sensor {
 	scale: f64,
 
 	update_task: Option<tokio::task::JoinHandle<()>>,
+	value_change_notifier: Option<ValueChangeNotifier>,
 }
 
 impl Sensor {
@@ -117,6 +131,7 @@ impl Sensor {
 			power_state: PowerState::Always,
 			scale: kind.hwmon_scale(),
 			update_task: None,
+			value_change_notifier: None,
 		}
 	}
 
@@ -149,18 +164,33 @@ impl Sensor {
 		self.power_state.active_now().await
 	}
 
+	async fn set_value(&mut self, newval: f64) {
+		let oldval = std::mem::replace(&mut self.cache, newval);
+		if let Some(notifier) = &self.value_change_notifier {
+			notifier.send(oldval, newval).await;
+		}
+	}
+
 	async fn update(&mut self) -> ErrResult<()> {
-		let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
-			Some(x) => Some(x.await),
-			None => None,
+		let ival = {
+			let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
+				Some(x) => match x.await {
+					Ok(h) => Some(h),
+					Err(e) => {
+						return Err(e);
+					},
+				},
+				None => None,
+			};
+
+			read_from_sysfs::<i32>(&mut self.fd)?
 		};
 
-		let ival = read_from_sysfs::<i32>(&mut self.fd)?;
-		self.cache = (ival as f64) * self.scale;
+		self.set_value((ival as f64) * self.scale).await;
 		Ok(())
 	}
 
-	pub async fn start_updates(self) -> Arc<Mutex<Self>> {
+	async fn start_updates(self, valuechg_notifier: ValueChangeNotifier) -> Arc<Mutex<Self>> {
 		let mut timer = tokio::time::interval(self.poll_interval);
 		let s = Arc::new(Mutex::new(self));
 
@@ -170,7 +200,7 @@ impl Sensor {
 		// s.update_task and make it un-droppable)
 		let w = Arc::downgrade(&s);
 
-		let update_task = tokio::spawn(async move {
+		let update_loop = async move {
 			loop {
 				if let Some(t) = w.upgrade() {
 					let mut sensor = t.lock().await;
@@ -185,8 +215,13 @@ impl Sensor {
 				// with large poll intervals)
 				timer.tick().await;
 			}
-		});
-		s.lock().await.deref_mut().update_task = Some(update_task);
+		};
+		{
+			let mut r = s.lock().await;
+			let r = r.deref_mut();
+			r.value_change_notifier = Some(valuechg_notifier);
+			r.update_task = Some(tokio::spawn(update_loop));
+		}
 		s
 	}
 
@@ -216,12 +251,12 @@ pub struct PhantomSensor {
 impl PhantomSensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub async fn activate(&self, path: dbus::Path<'_>, sensor: Sensor) -> DBusSensor {
+	pub async fn activate(&self, path: dbus::Path<'_>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> DBusSensor {
 		if sensor.kind != self.kind {
 			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
 				  sensor.name, self.kind, sensor.kind);
 		}
-		DBusSensor::new(path, sensor).await
+		DBusSensor::new(path, sensor, valuechg_cb).await
 	}
 }
 
@@ -243,10 +278,14 @@ pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
 type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
 
 impl DBusSensor {
-	pub async fn new(dbuspath: dbus::Path<'_>, sensor: Sensor) -> Self {
+	pub async fn new(dbuspath: dbus::Path<'_>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Self {
+		let notifier = ValueChangeNotifier {
+			dbuspath: dbuspath.clone().into_static(),
+			sendmsgfn: valuechg_cb,
+		};
 		Self {
 			dbuspath: dbuspath.into_static(),
-			state: DBusSensorState::Active(sensor.start_updates().await),
+			state: DBusSensorState::Active(sensor.start_updates(notifier).await),
 		}
 	}
 
@@ -315,17 +354,18 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut DBusSensorMap, key: String
 
 // Install a sensor into a given hashmap entry, returning None if the entry was
 // already occupied by an active sensor and Some(()) otherwise
-pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: dbus::Path<'_>, sensor: Sensor) -> Option<()>
+pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: dbus::Path<'_>,
+			    sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Option<()>
 {
 	match entry {
 		DBusSensorMapEntry::Vacant(e) => {
-			e.insert(Arc::new(Mutex::new(DBusSensor::new(dbuspath, sensor).await)));
+			e.insert(Arc::new(Mutex::new(DBusSensor::new(dbuspath, sensor, valuechg_cb).await)));
 		},
 		DBusSensorMapEntry::Occupied(ref mut e) => {
 			let new = {
 				let dbs = e.get().lock().await;
 				match &dbs.state {
-					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(dbuspath, sensor).await)),
+					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(dbuspath, sensor, valuechg_cb).await)),
 					DBusSensorState::Active(_) =>  return None,
 				}
 			};

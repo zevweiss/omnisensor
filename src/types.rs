@@ -1,6 +1,10 @@
 // Relatively generic convenience types
 
-use std::collections::HashSet;
+use std::{
+	collections::HashSet,
+	sync::Arc,
+};
+use tokio::sync::Mutex;
 
 pub type ErrResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -32,3 +36,5 @@ impl<T> From<Option<HashSet<T>>> for FilterSet<T> {
 		}
 	}
 }
+
+pub type SendValueChangeFn = Arc<Mutex<dyn Fn(&dbus::Path<'_>, f64, f64) + Send + Sync>>;

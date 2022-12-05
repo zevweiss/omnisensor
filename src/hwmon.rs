@@ -7,7 +7,7 @@ use glob;
 use phf::phf_set;
 
 use crate::{
-	types::{ErrResult, FilterSet},
+	types::*,
 	i2c::{
 		I2CDeviceParams,
 		I2CDeviceMap,
@@ -185,7 +185,7 @@ fn name_for_label(label: &str) -> &str {
 }
 
 pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
-			    dbuspaths: &FilterSet<dbus::Path<'_>>,
+			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>,
 			    i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
 	let configs = cfg.iter()
 		.filter_map(|(path, arccfg)| {
@@ -362,7 +362,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 				.with_power_state(sensorcfg.power_state);
 
 			// .expect() because we checked for Occupied(Active(_)) earlier
-			sensor::install_sensor(entry, dbuspath.clone(), sensor).await
+			sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await
 				.expect("sensor magically reactivated?");
 		}
 	}

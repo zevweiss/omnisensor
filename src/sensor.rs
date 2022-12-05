@@ -192,12 +192,10 @@ impl Sensor {
 
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub fn deactivate(&self) -> DBusSensor {
-		DBusSensor {
-			state: DBusSensorState::Phantom(PhantomSensor {
-				kind: self.kind,
-			}),
-		}
+	pub fn deactivate(&self) -> DBusSensorState {
+		DBusSensorState::Phantom(PhantomSensor {
+			kind: self.kind,
+		})
 	}
 }
 
@@ -218,12 +216,12 @@ pub struct PhantomSensor {
 impl PhantomSensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub async fn activate(&self, sensor: Sensor) -> DBusSensor {
+	pub async fn activate(&self, path: dbus::Path<'_>, sensor: Sensor) -> DBusSensor {
 		if sensor.kind != self.kind {
 			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
 				  sensor.name, self.kind, sensor.kind);
 		}
-		DBusSensor::new(sensor).await
+		DBusSensor::new(path, sensor).await
 	}
 }
 
@@ -236,6 +234,7 @@ pub enum DBusSensorState {
 }
 
 pub struct DBusSensor {
+	pub dbuspath: dbus::Path<'static>,
 	pub state: DBusSensorState,
 }
 
@@ -244,14 +243,15 @@ pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
 type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
 
 impl DBusSensor {
-	pub async fn new(sensor: Sensor) -> Self {
+	pub async fn new(dbuspath: dbus::Path<'_>, sensor: Sensor) -> Self {
 		Self {
+			dbuspath: dbuspath.into_static(),
 			state: DBusSensorState::Active(sensor.start_updates().await),
 		}
 	}
 
-	pub fn replace(&mut self, new: DBusSensor) {
-		drop(std::mem::replace(self, new))
+	pub fn update_state(&mut self, new: DBusSensorState) {
+		drop(std::mem::replace(&mut self.state, new))
 	}
 
 	pub async fn kind(&self) -> SensorType {
@@ -315,17 +315,17 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut DBusSensorMap, key: String
 
 // Install a sensor into a given hashmap entry, returning None if the entry was
 // already occupied by an active sensor and Some(()) otherwise
-pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, sensor: Sensor) -> Option<()>
+pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: dbus::Path<'_>, sensor: Sensor) -> Option<()>
 {
 	match entry {
 		DBusSensorMapEntry::Vacant(e) => {
-			e.insert(Arc::new(Mutex::new(DBusSensor::new(sensor).await)));
+			e.insert(Arc::new(Mutex::new(DBusSensor::new(dbuspath, sensor).await)));
 		},
 		DBusSensorMapEntry::Occupied(ref mut e) => {
 			let new = {
 				let dbs = e.get().lock().await;
 				match &dbs.state {
-					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(sensor).await)),
+					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(dbuspath, sensor).await)),
 					DBusSensorState::Active(_) =>  return None,
 				}
 			};

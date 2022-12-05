@@ -108,7 +108,7 @@ async fn deactivate_sensors(sensors: &mut DBusSensorMap) {
 			}
 			sensor.deactivate()
 		};
-		dbs.replace(new);
+		dbs.update_state(new);
 	}
 }
 

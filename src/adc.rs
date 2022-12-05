@@ -84,11 +84,11 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSens
 	let configs = cfgmap.iter()
 		.filter_map(|(path, arccfg)| {
 			match arccfg.as_ref() {
-				SensorConfig::ADC(cfg) if dbuspaths.contains(path) => Some((arccfg, cfg)),
+				SensorConfig::ADC(cfg) if dbuspaths.contains(path) => Some((path, arccfg, cfg)),
 				_ => None,
 			}
 		});
-	for (arccfg, sensorcfg) in configs {
+	for (dbuspath, arccfg, sensorcfg) in configs {
 		if sensorcfg.index >= adcpaths.len() as u64 {
 			eprintln!("{} ignored, no corresponding file found",
 				  sensorcfg.name);
@@ -135,7 +135,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSens
 			.with_power_state(sensorcfg.power_state);
 
 		// .expect() because we checked for Occupied(Active(_)) earlier
-		sensor::install_sensor(entry, sensor).await
+		sensor::install_sensor(entry, dbuspath.clone(), sensor).await
 			.expect("sensor magically reactivated?");
 	}
 	Ok(())

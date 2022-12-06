@@ -77,7 +77,7 @@ pub enum SensorConfig {
 	Hwmon(HwmonSensorConfig),
 }
 
-pub type SensorConfigMap<'a> = HashMap<dbus::Path<'a>, Arc<SensorConfig>>;
+pub type SensorConfigMap<'a> = HashMap<dbus::Path<'a>, SensorConfig>;
 
 // FIXME: this "should" just be a closure, but I ran out of patience
 // trying to get my attempts at it past the borrow checker...
@@ -93,8 +93,6 @@ impl ValueChangeNotifier {
 }
 
 pub struct Sensor {
-	cfg: Arc<SensorConfig>,
-
 	pub name: String,
 	pub kind: SensorType,
 	pub cache: f64,
@@ -118,9 +116,8 @@ pub struct Sensor {
 }
 
 impl Sensor {
-	pub fn new(cfg: Arc<SensorConfig>, name: &str, kind: SensorType, fd: std::fs::File) -> Self {
+	pub fn new(name: &str, kind: SensorType, fd: std::fs::File) -> Self {
 		Self {
-			cfg,
 			name: name.into(),
 			kind,
 			fd,

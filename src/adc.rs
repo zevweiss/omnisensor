@@ -83,37 +83,37 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSens
 			    -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
 	let configs = cfgmap.iter()
-		.filter_map(|(path, arccfg)| {
-			match arccfg.as_ref() {
-				SensorConfig::ADC(cfg) if dbuspaths.contains(path) => Some((path, arccfg, cfg)),
+		.filter_map(|(path, cfg)| {
+			match cfg {
+				SensorConfig::ADC(adccfg) if dbuspaths.contains(path) => Some((path, adccfg)),
 				_ => None,
 			}
 		});
-	for (dbuspath, arccfg, sensorcfg) in configs {
-		if sensorcfg.index >= adcpaths.len() as u64 {
+	for (dbuspath, adccfg) in configs {
+		if adccfg.index >= adcpaths.len() as u64 {
 			eprintln!("{} ignored, no corresponding file found",
-				  sensorcfg.name);
+				  adccfg.name);
 			continue;
 		}
 
-		if !sensorcfg.power_state.active_now().await {
+		if !adccfg.power_state.active_now().await {
 			// FIXME: log noise
-			eprintln!("{}: not active, skipping...", sensorcfg.name);
+			eprintln!("{}: not active, skipping...", adccfg.name);
 			continue;
 		}
 
-		let entry = match sensor::get_nonactive_sensor_entry(sensors, sensorcfg.name.clone()).await {
+		let entry = match sensor::get_nonactive_sensor_entry(sensors, adccfg.name.clone()).await {
 			Some(e) => e,
 			None => continue,
 		};
 
-		let path = &adcpaths[sensorcfg.index as usize];
-		let bridge_gpio = match &sensorcfg.bridge_gpio {
+		let path = &adcpaths[adccfg.index as usize];
+		let bridge_gpio = match &adccfg.bridge_gpio {
 			Some(c) => match BridgeGPIO::from_config(c.clone()) {
 				Ok(c) => Some(c),
 				Err(e) => {
 					eprintln!("Failed to get bridge GPIO {} for {}: {}", c.name,
-						  sensorcfg.name, e);
+						  adccfg.name, e);
 					continue;
 				}
 			},
@@ -124,16 +124,16 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSens
 			Ok(f) => f,
 			Err(e) => {
 				eprintln!("Failed to open {} for {}: {}",
-					  path.display(), sensorcfg.name, e);
+					  path.display(), adccfg.name, e);
 				continue;
 			},
 		};
 
-		let sensor = Sensor::new(arccfg.clone(), &sensorcfg.name, SensorType::Voltage, fd)
-			.with_poll_interval(sensorcfg.poll_interval)
-			.with_scale(sensorcfg.scale)
+		let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, fd)
+			.with_poll_interval(adccfg.poll_interval)
+			.with_scale(adccfg.scale)
 			.with_bridge_gpio(bridge_gpio)
-			.with_power_state(sensorcfg.power_state);
+			.with_power_state(adccfg.power_state);
 
 		// .expect() because we checked for Occupied(Active(_)) earlier
 		sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await

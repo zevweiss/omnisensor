@@ -188,22 +188,22 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>,
 			    i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
 	let configs = cfg.iter()
-		.filter_map(|(path, arccfg)| {
-			match arccfg.as_ref() {
-				SensorConfig::Hwmon(cfg) if dbuspaths.contains(path) => Some((path, arccfg, cfg)),
+		.filter_map(|(path, cfg)| {
+			match cfg {
+				SensorConfig::Hwmon(hwmcfg) if dbuspaths.contains(path) => Some((path, hwmcfg)),
 				_ => None,
 			}
 		});
-	for (dbuspath, arccfg, sensorcfg) in configs {
-		let mainname = &sensorcfg.names[0];
+	for (dbuspath, hwmcfg) in configs {
+		let mainname = &hwmcfg.names[0];
 
-		if !sensorcfg.power_state.active_now().await {
+		if !hwmcfg.power_state.active_now().await {
 			// FIXME: log noise
 			eprintln!("{}: not active, skipping...", mainname);
 			continue;
 		}
 
-		let i2cparams = &sensorcfg.i2c;
+		let i2cparams = &hwmcfg.i2c;
 
 		let sysfs_dir = i2cparams.sysfs_device_dir();
 
@@ -227,7 +227,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 			},
 		};
 
-		let pattern = match sensorcfg.subtype() {
+		let pattern = match hwmcfg.subtype() {
 			HwmonSubType::PSU => "*_input",
 			HwmonSubType::HwmonTemp => "temp*_input",
 		};
@@ -331,11 +331,11 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 				file.base.to_string()
 			};
 
-			if !sensorcfg.enabled_labels.contains(&label) {
+			if !hwmcfg.enabled_labels.contains(&label) {
 				continue;
 			}
 
-			let sensorname = match sensorcfg.sensor_name(idx, &label) {
+			let sensorname = match hwmcfg.sensor_name(idx, &label) {
 				Some(n) => n,
 				_ => {
 					eprintln!("{}: {} does not appear to be in use, skipping", mainname, label);
@@ -356,10 +356,10 @@ pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorM
 				},
 			};
 
-			let sensor = Sensor::new(arccfg.clone(), &sensorname, file.kind, fd)
-				.with_poll_interval(sensorcfg.poll_interval)
+			let sensor = Sensor::new(&sensorname, file.kind, fd)
+				.with_poll_interval(hwmcfg.poll_interval)
 				.with_i2cdev(i2cdev.clone())
-				.with_power_state(sensorcfg.power_state);
+				.with_power_state(hwmcfg.power_state);
 
 			// .expect() because we checked for Occupied(Active(_)) earlier
 			sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await

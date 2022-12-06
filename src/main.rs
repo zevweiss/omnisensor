@@ -65,7 +65,7 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 						},
 					};
 					println!("\t{:?}", cfg);
-					result.insert(path.clone(), Arc::new(SensorConfig::ADC(cfg)));
+					result.insert(path.clone(), SensorConfig::ADC(cfg));
 				}
 				"LM25066"|"W83773G"|"NCT6779" => {
 					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, submap) {
@@ -76,7 +76,7 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 						},
 					};
 					println!("\t{:?}", cfg);
-					result.insert(path.clone(), Arc::new(SensorConfig::Hwmon(cfg)));
+					result.insert(path.clone(), SensorConfig::Hwmon(cfg));
 				},
 				_ => {
 					println!("\t{}:", k);

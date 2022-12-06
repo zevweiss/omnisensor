@@ -37,15 +37,15 @@ use sensor::{
 const DBUS_NAME: &'static str = "xyz.openbmc_project.FooSensor";
 const ENTITY_MANAGER_NAME: &'static str = "xyz.openbmc_project.EntityManager";
 
-async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap<'_>> {
+async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap> {
 	let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, "/xyz/openbmc_project/inventory",
 				     Duration::from_secs(30), bus);
 	let objs = p.get_managed_objects().await?;
 	let mut result = SensorConfigMap::new();
 
-	for (path, submap) in &objs {
+	'objloop: for (path, submap) in objs.into_iter() {
 		println!("managed object: {}", path);
-		for (k, props) in submap {
+		for (k, props) in &submap {
 			let parts: Vec<&str> = k.split('.').collect();
 			if parts.len() != 4
 				|| parts[0] != "xyz"
@@ -57,7 +57,7 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 
 			match cfgtype {
 				"ADC" => {
-					let cfg = match adc::ADCSensorConfig::from_dbus(props, submap) {
+					let cfg = match adc::ADCSensorConfig::from_dbus(props, &submap) {
 						Some(c) => c,
 						_ => {
 							eprintln!("{}: malformed config data", path);
@@ -65,10 +65,11 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 						},
 					};
 					println!("\t{:?}", cfg);
-					result.insert(path.clone(), SensorConfig::ADC(cfg));
+					result.insert(Arc::new(path), SensorConfig::ADC(cfg));
+					continue 'objloop;
 				}
 				"LM25066"|"W83773G"|"NCT6779" => {
-					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, submap) {
+					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, &submap) {
 						Some(c) => c,
 						_ => {
 							eprintln!("{}: malformed config data", path);
@@ -76,7 +77,8 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 						},
 					};
 					println!("\t{:?}", cfg);
-					result.insert(path.clone(), SensorConfig::Hwmon(cfg));
+					result.insert(Arc::new(path), SensorConfig::Hwmon(cfg));
+					continue 'objloop;
 				},
 				_ => {
 					println!("\t{}:", k);

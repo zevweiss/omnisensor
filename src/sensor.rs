@@ -77,12 +77,12 @@ pub enum SensorConfig {
 	Hwmon(HwmonSensorConfig),
 }
 
-pub type SensorConfigMap<'a> = HashMap<dbus::Path<'a>, SensorConfig>;
+pub type SensorConfigMap = HashMap<Arc<dbus::Path<'static>>, SensorConfig>;
 
 // FIXME: this "should" just be a closure, but I ran out of patience
 // trying to get my attempts at it past the borrow checker...
 struct ValueChangeNotifier {
-	dbuspath: dbus::Path<'static>,
+	dbuspath: Arc<dbus::Path<'static>>,
 	sendmsgfn: SendValueChangeFn,
 }
 
@@ -248,12 +248,12 @@ pub struct PhantomSensor {
 impl PhantomSensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub async fn activate(&self, path: dbus::Path<'_>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> DBusSensor {
+	pub async fn activate(&self, path: Arc<dbus::Path<'static>>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> DBusSensor {
 		if sensor.kind != self.kind {
 			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
 				  sensor.name, self.kind, sensor.kind);
 		}
-		DBusSensor::new(path, sensor, valuechg_cb).await
+		DBusSensor::new(path.clone(), sensor, valuechg_cb).await
 	}
 }
 
@@ -266,7 +266,7 @@ pub enum DBusSensorState {
 }
 
 pub struct DBusSensor {
-	pub dbuspath: dbus::Path<'static>,
+	pub dbuspath: Arc<dbus::Path<'static>>,
 	pub state: DBusSensorState,
 }
 
@@ -275,13 +275,13 @@ pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
 type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
 
 impl DBusSensor {
-	pub async fn new(dbuspath: dbus::Path<'_>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Self {
+	pub async fn new(dbuspath: Arc<dbus::Path<'static>>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Self {
 		let notifier = ValueChangeNotifier {
-			dbuspath: dbuspath.clone().into_static(),
+			dbuspath: dbuspath.clone(),
 			sendmsgfn: valuechg_cb,
 		};
 		Self {
-			dbuspath: dbuspath.into_static(),
+			dbuspath: dbuspath.clone(),
 			state: DBusSensorState::Active(sensor.start_updates(notifier).await),
 		}
 	}
@@ -351,18 +351,18 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut DBusSensorMap, key: String
 
 // Install a sensor into a given hashmap entry, returning None if the entry was
 // already occupied by an active sensor and Some(()) otherwise
-pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: dbus::Path<'_>,
+pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: Arc<dbus::Path<'static>>,
 			    sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Option<()>
 {
 	match entry {
 		DBusSensorMapEntry::Vacant(e) => {
-			e.insert(Arc::new(Mutex::new(DBusSensor::new(dbuspath, sensor, valuechg_cb).await)));
+			e.insert(Arc::new(Mutex::new(DBusSensor::new(dbuspath.clone(), sensor, valuechg_cb).await)));
 		},
 		DBusSensorMapEntry::Occupied(ref mut e) => {
 			let new = {
 				let dbs = e.get().lock().await;
 				match &dbs.state {
-					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(dbuspath, sensor, valuechg_cb).await)),
+					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(dbuspath.clone(), sensor, valuechg_cb).await)),
 					DBusSensorState::Active(_) =>  return None,
 				}
 			};

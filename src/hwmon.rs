@@ -184,7 +184,7 @@ fn name_for_label(label: &str) -> &str {
 	}
 }
 
-pub async fn update_sensors(cfg: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
+pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>,
 			    i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
 	let configs = cfg.iter()

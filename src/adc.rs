@@ -78,7 +78,7 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 	Ok(paths)
 }
 
-pub async fn update_sensors(cfgmap: &SensorConfigMap<'_>, sensors: &mut DBusSensorMap,
+pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMap,
 			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>)
 			    -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)

@@ -15,6 +15,7 @@ use crate::{
 	i2c::I2CDevice,
 	gpio::BridgeGPIO,
 	powerstate::PowerState,
+	threshold::Thresholds,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -103,6 +104,8 @@ pub struct Sensor {
 	poll_interval: Duration,
 	power_state: PowerState,
 
+	pub thresholds: Thresholds,
+
 	// This is a combined scale factor set to the product of the
 	// innate hwmon scaling factor (e.g. 1000 to convert a sysfs
 	// millivolt value to volts) and any optional additional
@@ -126,6 +129,7 @@ impl Sensor {
 			i2cdev: None,
 			poll_interval: Duration::from_secs(1),
 			power_state: PowerState::Always,
+			thresholds: Thresholds::new(),
 			scale: kind.hwmon_scale(),
 			update_task: None,
 			value_change_notifier: None,
@@ -152,6 +156,11 @@ impl Sensor {
 		self
 	}
 
+	pub fn with_thresholds(mut self, thresholds: Thresholds) -> Self {
+		self.thresholds = thresholds;
+		self
+	}
+
 	pub fn with_scale(mut self, scale: f64) -> Self {
 		self.scale = scale * self.kind.hwmon_scale();
 		self
@@ -165,6 +174,10 @@ impl Sensor {
 		let oldval = std::mem::replace(&mut self.cache, newval);
 		if let Some(notifier) = &self.value_change_notifier {
 			notifier.send(oldval, newval).await;
+		}
+
+		for t in self.thresholds.values_mut() {
+			t.update(newval);
 		}
 	}
 
@@ -224,9 +237,10 @@ impl Sensor {
 
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub fn deactivate(&self) -> DBusSensorState {
+	pub fn deactivate(&mut self) -> DBusSensorState {
 		DBusSensorState::Phantom(PhantomSensor {
 			kind: self.kind,
+			thresholds: std::mem::take(&mut self.thresholds),
 		})
 	}
 }
@@ -243,6 +257,7 @@ impl Drop for Sensor {
 // can continue serving it up over dbus
 pub struct PhantomSensor {
 	kind: SensorType,
+	pub thresholds: Thresholds,
 }
 
 impl PhantomSensor {

@@ -24,6 +24,7 @@ mod hwmon;
 mod i2c;
 mod gpio;
 mod powerstate;
+mod threshold;
 
 use types::*;
 use sensor::{
@@ -57,7 +58,7 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 
 			match cfgtype {
 				"ADC" => {
-					let cfg = match adc::ADCSensorConfig::from_dbus(props, &submap) {
+					let cfg = match adc::ADCSensorConfig::from_dbus(props, k, &submap) {
 						Some(c) => c,
 						_ => {
 							eprintln!("{}: malformed config data", path);
@@ -69,7 +70,7 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 					continue 'objloop;
 				}
 				"LM25066"|"W83773G"|"NCT6779" => {
-					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, &submap) {
+					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) {
 						Some(c) => c,
 						_ => {
 							eprintln!("{}: malformed config data", path);
@@ -100,7 +101,7 @@ async fn deactivate_sensors(sensors: &mut DBusSensorMap) {
 				DBusSensorState::Active(s) => s,
 				DBusSensorState::Phantom(_) => continue,
 			};
-			let sensor = arcsensor.lock().await;
+			let mut sensor = arcsensor.lock().await;
 			if sensor.active_now().await {
 				continue;
 			}
@@ -138,9 +139,6 @@ async fn register_properties_changed_handler<H, R>(bus: &nonblock::SyncConnectio
 
 	Ok(signal)
 }
-
-type PropChangeMsgFn = Box<dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg) -> Option<dbus::Message> + Send + Sync>;
-type SensorIntfToken = dbus_crossroads::IfaceToken<Arc<Mutex<DBusSensor>>>;
 
 fn build_sensor_value_intf(cr: &mut Crossroads) -> (SensorIntfToken, PropChangeMsgFn) {
 	let mut value_changed_msg_fn = None;
@@ -192,6 +190,7 @@ async fn main() -> ErrResult<()> {
 	cr.set_object_manager_support(Some(sysbus.clone()));
 
 	let (value_intf, value_propchg_msgfn) = build_sensor_value_intf(&mut cr);
+	let threshold_ifaces = threshold::build_sensor_threshold_intfs(&mut cr);
 	powerstate::init_host_state(&sysbus).await;
 
 	let send_value_propchg = move |dbuspath: &dbus::Path<'_>, old: f64, new: f64| {
@@ -237,7 +236,11 @@ async fn main() -> ErrResult<()> {
 		};
 		let cleanname = s.name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", s.kind.dbus_category(), cleanname);
-		cr.insert(dbuspath, &[value_intf], dbs.clone());
+		let mut ifaces = vec![value_intf];
+		for t in s.thresholds.keys() {
+			ifaces.push(*threshold_ifaces.get(t).expect("no interface for threshold severity"));
+		}
+		cr.insert(dbuspath, &ifaces, dbs.clone());
 	}
 
 	sysbus.start_receive(MatchRule::new_method_call(), Box::new(move |msg, conn| {

@@ -22,6 +22,8 @@ use crate::{
 		SensorConfigMap,
 		SensorType,
 	},
+	threshold,
+	threshold::ThresholdConfig
 };
 
 #[derive(Debug)]
@@ -31,6 +33,7 @@ pub struct HwmonSensorConfig {
 	i2c: I2CDeviceParams,
 	poll_interval: Duration,
 	power_state: PowerState,
+	thresholds: Vec<ThresholdConfig>,
 	enabled_labels: FilterSet<String>,
 }
 
@@ -86,7 +89,7 @@ enum HwmonSubType {
 }
 
 impl HwmonSensorConfig {
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, _intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
 		use dbus::arg::prop_cast;
 		let name: &String = prop_cast(basecfg, "Name")?;
 		let mut name_overrides: HashMap<String, String> = HashMap::new();
@@ -107,6 +110,7 @@ impl HwmonSensorConfig {
 		let enabled_labels: FilterSet<String> = prop_cast(basecfg, "Labels")
 			.map(|v: &Vec<_>| HashSet::from_iter(v.iter().cloned()))
 			.into();
+		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 
 		for (key, value) in basecfg {
 			if let Some(lbl) = key.strip_suffix("_Name") {
@@ -124,6 +128,7 @@ impl HwmonSensorConfig {
 			i2c,
 			poll_interval,
 			power_state,
+			thresholds,
 			enabled_labels,
 		})
 	}
@@ -359,7 +364,8 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 			let sensor = Sensor::new(&sensorname, file.kind, fd)
 				.with_poll_interval(hwmcfg.poll_interval)
 				.with_i2cdev(i2cdev.clone())
-				.with_power_state(hwmcfg.power_state);
+				.with_power_state(hwmcfg.power_state)
+				.with_thresholds(threshold::get_thresholds_from_configs(&hwmcfg.thresholds));
 
 			// .expect() because we checked for Occupied(Active(_)) earlier
 			sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await

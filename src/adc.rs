@@ -16,6 +16,8 @@ use crate::{
 		SensorConfigMap,
 		SensorType,
 	},
+	threshold,
+	threshold::ThresholdConfig,
 };
 
 #[derive(Debug)]
@@ -27,11 +29,12 @@ pub struct ADCSensorConfig {
 	// config, so that we can multiply instead of dividing
 	scale: f64,
 	power_state: PowerState,
+	thresholds: Vec<ThresholdConfig>,
 	bridge_gpio: Option<Arc<BridgeGPIOConfig>>,
 }
 
 impl ADCSensorConfig {
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
 		use dbus::arg::prop_cast;
 		let name: &String = prop_cast(basecfg, "Name")?;
 		let index: u64 = *prop_cast(basecfg, "Index")?;
@@ -40,6 +43,7 @@ impl ADCSensorConfig {
 		let power_state = PowerState::from_dbus(basecfg.get("PowerState"))?;
 		let bridge_gpio = intfs.get("xyz.openbmc_project.Configuration.ADC.BridgeGpio0")
 			.map(BridgeGPIOConfig::from_dbus).flatten().map(Arc::new);
+		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 
 		if !scale.is_finite() || scale == 0.0 {
 			eprintln!("{}: ScaleFactor must be finite and non-zero (got {})", name, scale);
@@ -52,6 +56,7 @@ impl ADCSensorConfig {
 			poll_interval: Duration::from_secs(poll_sec),
 			scale: 1.0 / scale, // convert to a multiplier
 			power_state,
+			thresholds,
 			bridge_gpio,
 		})
 	}
@@ -133,7 +138,8 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			.with_poll_interval(adccfg.poll_interval)
 			.with_scale(adccfg.scale)
 			.with_bridge_gpio(bridge_gpio)
-			.with_power_state(adccfg.power_state);
+			.with_power_state(adccfg.power_state)
+			.with_thresholds(threshold::get_thresholds_from_configs(&adccfg.thresholds));
 
 		// .expect() because we checked for Occupied(Active(_)) earlier
 		sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await

@@ -10,8 +10,9 @@ use glob;
 
 use crate::{
 	types::*,
-	adc::ADCSensorConfig,
-	hwmon::HwmonSensorConfig,
+	adc,
+	hwmon,
+	i2c,
 	i2c::I2CDevice,
 	gpio::BridgeGPIO,
 	powerstate::PowerState,
@@ -28,7 +29,7 @@ pub enum SensorType {
 }
 
 impl SensorType {
-	pub fn dbus_unit_str(&self) -> &'static str {
+	fn dbus_unit_str(&self) -> &'static str {
 		match self {
 			Self::Temperature => "xyz.openbmc_project.Sensor.Value.Unit.DegreesC",
 			Self::RPM => "xyz.openbmc_project.Sensor.Value.Unit.RPMS",
@@ -48,7 +49,7 @@ impl SensorType {
 		}
 	}
 
-	pub fn hwmon_scale(&self) -> f64 {
+	fn hwmon_scale(&self) -> f64 {
 		const UNIT: f64 = 1.0;
 		const MILLI: f64 = 0.001;
 		const MICRO: f64 = 0.000001;
@@ -74,8 +75,8 @@ impl SensorType {
 }
 
 pub enum SensorConfig {
-	ADC(ADCSensorConfig),
-	Hwmon(HwmonSensorConfig),
+	ADC(adc::ADCSensorConfig),
+	Hwmon(hwmon::HwmonSensorConfig),
 }
 
 pub type SensorConfigMap = HashMap<Arc<dbus::Path<'static>>, SensorConfig>;
@@ -96,7 +97,7 @@ impl ValueChangeNotifier {
 pub struct Sensor {
 	pub name: String,
 	pub kind: SensorType,
-	pub cache: f64,
+	cache: f64,
 
 	fd: std::fs::File,
 	bridge_gpio: Option<BridgeGPIO>,
@@ -166,7 +167,7 @@ impl Sensor {
 		self
 	}
 
-	pub async fn active_now(&self) -> bool {
+	async fn active_now(&self) -> bool {
 		self.power_state.active_now().await
 	}
 
@@ -237,7 +238,7 @@ impl Sensor {
 
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub fn deactivate(&mut self) -> DBusSensorState {
+	fn deactivate(&mut self) -> DBusSensorState {
 		DBusSensorState::Phantom(PhantomSensor {
 			kind: self.kind,
 			thresholds: std::mem::take(&mut self.thresholds),
@@ -263,7 +264,7 @@ pub struct PhantomSensor {
 impl PhantomSensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	pub async fn activate(&self, path: Arc<dbus::Path<'static>>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> DBusSensor {
+	async fn activate(&self, path: Arc<dbus::Path<'static>>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> DBusSensor {
 		if sensor.kind != self.kind {
 			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
 				  sensor.name, self.kind, sensor.kind);
@@ -281,7 +282,6 @@ pub enum DBusSensorState {
 }
 
 pub struct DBusSensor {
-	pub dbuspath: Arc<dbus::Path<'static>>,
 	pub state: DBusSensorState,
 }
 
@@ -290,22 +290,21 @@ pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
 type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
 
 impl DBusSensor {
-	pub async fn new(dbuspath: Arc<dbus::Path<'static>>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Self {
+	async fn new(dbuspath: Arc<dbus::Path<'static>>, sensor: Sensor, valuechg_cb: SendValueChangeFn) -> Self {
 		let notifier = ValueChangeNotifier {
 			dbuspath: dbuspath.clone(),
 			sendmsgfn: valuechg_cb,
 		};
 		Self {
-			dbuspath: dbuspath.clone(),
 			state: DBusSensorState::Active(sensor.start_updates(notifier).await),
 		}
 	}
 
-	pub fn update_state(&mut self, new: DBusSensorState) {
+	fn update_state(&mut self, new: DBusSensorState) {
 		drop(std::mem::replace(&mut self.state, new))
 	}
 
-	pub async fn kind(&self) -> SensorType {
+	async fn kind(&self) -> SensorType {
 		match &self.state {
 			DBusSensorState::Active(s) => s.lock().await.kind,
 			DBusSensorState::Phantom(p) => p.kind,
@@ -386,4 +385,73 @@ pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: Arc<dbu
 	};
 
 	Some(())
+}
+
+pub fn build_value_intf(cr: &mut dbus_crossroads::Crossroads) -> (SensorIntfToken, PropChangeMsgFn) {
+	let mut value_changed_msg_fn = None;
+	let intf = "xyz.openbmc_project.Sensor.Value";
+	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<DBusSensor>>>| {
+		b.property("Unit")
+			.get_async(|mut ctx, dbs| {
+				let dbs = dbs.clone();
+				async move {
+					let u = dbs.lock().await
+						.kind().await
+						.dbus_unit_str();
+					ctx.reply(Ok(u.to_string()))
+				}
+			});
+		let pb = b.property("Value")
+			.get_async(|mut ctx, dbs| {
+				let dbs = dbs.clone();
+				async move {
+					let x = match &dbs.lock().await.state {
+						DBusSensorState::Active(s) => s.lock().await.cache,
+						DBusSensorState::Phantom(_) => f64::NAN,
+					};
+					ctx.reply(Ok(x))
+				}
+			})
+			.emits_changed_true();
+		value_changed_msg_fn = Some(pb.changed_msg_fn());
+	});
+	(token, value_changed_msg_fn.expect("no value_changed_msg_fn set?"))
+}
+
+pub async fn deactivate(sensors: &mut DBusSensorMap) {
+	for (name, dbs) in sensors.iter_mut() {
+		let dbs = &mut *dbs.lock().await;
+		let new = {
+			let arcsensor = match &dbs.state {
+				DBusSensorState::Active(s) => s,
+				DBusSensorState::Phantom(_) => continue,
+			};
+			let mut sensor = arcsensor.lock().await;
+			if sensor.active_now().await {
+				continue;
+			}
+			let nrefs = Arc::strong_count(&arcsensor);
+			if nrefs > 1 {
+				eprintln!("{} refcount = {} at deactivation, will leak!", name, nrefs);
+			}
+			sensor.deactivate()
+		};
+		dbs.update_state(new);
+	}
+}
+
+pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
+			send_value_propchg: &SendValueChangeFn, filter: &FilterSet<dbus::Path<'static>>,
+			i2cdevs: &Mutex<i2c::I2CDeviceMap>) {
+	let cfg = cfg.lock().await;
+	let mut sensors = sensors.lock().await;
+
+	adc::update_sensors(&cfg, &mut sensors, send_value_propchg.clone(), filter).await.unwrap_or_else(|e| {
+		eprintln!("Failed to update ADC sensors: {}", e);
+	});
+
+	let mut i2cdevs = i2cdevs.lock().await;
+	hwmon::update_sensors(&cfg, &mut sensors, send_value_propchg.clone(), filter, &mut i2cdevs).await.unwrap_or_else(|e| {
+		eprintln!("Failed to update hwmon sensors: {}", e);
+	});
 }

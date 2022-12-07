@@ -230,6 +230,17 @@ impl Sensor {
 
 	fn arm_autoprops(&mut self, conn: &Arc<dbus::nonblock::SyncConnection>, dbuspath: &Arc<dbus::Path<'static>>, intfs: &SensorIntfData) {
 		self.cache.arm(conn, dbuspath, &intfs.value.msgfns.value);
+		for (sev, threshold) in self.thresholds.iter_mut() {
+			let threshold_intf = match intfs.thresholds.get(sev) {
+				Some(i) => i,
+				_ => {
+					eprintln!("no interface found for {:?}?", sev);
+					continue;
+				},
+			};
+
+			threshold.arm_autoprops(conn, dbuspath, &threshold_intf.msgfns)
+		}
 	}
 }
 

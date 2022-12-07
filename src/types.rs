@@ -38,6 +38,5 @@ impl<T> From<Option<HashSet<T>>> for FilterSet<T> {
 	}
 }
 
-pub type SendValueChangeFn = Arc<Mutex<dyn Fn(&dbus::Path<'_>, f64, f64) + Send + Sync>>;
-pub type PropChangeMsgFn = Box<dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg) -> Option<dbus::Message> + Send + Sync>;
+pub type PropChgMsgFn = dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg) -> Option<dbus::Message> + Send + Sync;
 pub type SensorIntfToken = dbus_crossroads::IfaceToken<Arc<Mutex<DBusSensor>>>;

@@ -5,7 +5,7 @@ use std::{
 };
 use dbus_tokio::connection;
 use dbus::{
-	channel::{MatchingReceiver, Sender},
+	channel::MatchingReceiver,
 	message::MatchRule,
 	nonblock,
 	nonblock::stdintf::org_freedesktop_dbus::ObjectManager,
@@ -22,6 +22,7 @@ mod i2c;
 mod gpio;
 mod powerstate;
 mod threshold;
+mod dbus_helpers;
 
 use types::*;
 use sensor::{
@@ -115,8 +116,8 @@ async fn register_properties_changed_handler<H, R>(bus: &nonblock::SyncConnectio
 }
 
 async fn handle_propchange(bus: &nonblock::SyncConnection, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
-			   send_value_propchg: &SendValueChangeFn, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
-			   changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>, msg: dbus::message::Message) {
+			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>,
+			   msg: dbus::message::Message) {
 	let path = match msg.path() {
 		Some(p) => p.into_static(),
 		_ => return,
@@ -160,7 +161,7 @@ async fn handle_propchange(bus: &nonblock::SyncConnection, cfg: &Mutex<SensorCon
 		*cfg.lock().await = newcfg;
 	}
 
-	sensor::update_all(cfg, sensors, send_value_propchg, &filter, i2cdevs).await;
+	sensor::update_all(cfg, sensors, &filter, i2cdevs).await;
 }
 
 #[tokio::main]
@@ -182,27 +183,9 @@ async fn main() -> ErrResult<()> {
 	cr.set_async_support(Some((sysbus.clone(), Box::new(|x| { tokio::spawn(x); }))));
 	cr.set_object_manager_support(Some(sysbus.clone()));
 
-	let (value_intf, value_propchg_msgfn) = sensor::build_value_intf(&mut cr);
-	let threshold_ifaces = threshold::build_sensor_threshold_intfs(&mut cr);
-	powerstate::init_host_state(&sysbus).await;
+	let sensor_intfs = sensor::build_sensor_intfs(&mut cr);
 
-	let send_value_propchg = move |dbuspath: &dbus::Path<'_>, old: f64, new: f64| {
-		if old == new {
-			return;
-		}
-		let msg = match value_propchg_msgfn(dbuspath,
-						    &dbus::arg::Variant(new)) {
-			Some(m) => m,
-			None => {
-				eprintln!("failed to create value-update message?");
-				return;
-			},
-		};
-		if sysbus.send(msg).is_err() {
-			eprintln!("failed to send value-update propchange signal?");
-		}
-	};
-	let send_value_propchg: SendValueChangeFn = Arc::new(Mutex::new(send_value_propchg));
+	powerstate::init_host_state(sysbus).await;
 
 	fn globalize<T>(x: T) -> &'static Mutex<T> {
 		Box::leak(Box::new(Mutex::new(x)))
@@ -213,9 +196,9 @@ async fn main() -> ErrResult<()> {
 	// is stable we can switch these to be real globals instead.
 	let sensors = globalize(HashMap::new());
 	let i2cdevs = globalize(i2c::I2CDeviceMap::new());
-	let cfg = globalize(get_config(&sysbus).await?); // FIXME (error handling)
+	let cfg = globalize(get_config(sysbus).await?); // FIXME (error handling)
 
-	sensor::update_all(cfg, sensors, &send_value_propchg, &FilterSet::All, i2cdevs).await;
+	sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs).await;
 
 	cr.insert("/xyz", &[], ());
 	cr.insert("/xyz/openbmc_project", &[], ());
@@ -224,7 +207,8 @@ async fn main() -> ErrResult<()> {
 	let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 
 	for (name, dbs) in sensors.lock().await.iter() {
-		let inner = dbs.lock().await;
+		let mut inner = dbs.lock().await;
+		inner.arm_autoprops(sysbus, &sensor_intfs).await;
 		let s = match inner.state {
 			DBusSensorState::Active(ref s) => s.lock().await,
 			DBusSensorState::Phantom(_) => {
@@ -234,9 +218,10 @@ async fn main() -> ErrResult<()> {
 		};
 		let cleanname = s.name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", s.kind.dbus_category(), cleanname);
-		let mut ifaces = vec![value_intf];
+		let mut ifaces = vec![sensor_intfs.value.token];
 		for t in s.thresholds.keys() {
-			ifaces.push(*threshold_ifaces.get(t).expect("no interface for threshold severity"));
+			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");
+			ifaces.push(intfdata.token);
 		}
 		cr.insert(dbuspath, &ifaces, dbs.clone());
 	}
@@ -247,26 +232,25 @@ async fn main() -> ErrResult<()> {
 	}));
 
 
-	let send_value_propchg: &_ = Box::leak(Box::new(send_value_propchg));
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
-			sensor::update_all(cfg, sensors, send_value_propchg, &FilterSet::All, i2cdevs).await;
+			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs).await;
 		} else {
 			let mut sensors = sensors.lock().await;
 			sensor::deactivate(&mut sensors).await;
 		}
 	};
 
-	let _powersignals = powerstate::register_power_signal_handler(&sysbus, powerhandler).await?;
+	let _powersignals = powerstate::register_power_signal_handler(sysbus, powerhandler).await?;
 
 	#[allow(non_upper_case_globals)]
 	static changed_paths: Mutex<Option<HashSet<dbus::Path>>> = Mutex::const_new(None);
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
-		handle_propchange(&sysbus, cfg, sensors, send_value_propchg, i2cdevs, &changed_paths, msg).await;
+		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, msg).await;
 	};
 
-	let _propsignals = register_properties_changed_handler(&sysbus, prophandler).await?;
+	let _propsignals = register_properties_changed_handler(sysbus, prophandler).await?;
 
 	println!("Hello, world!");
 

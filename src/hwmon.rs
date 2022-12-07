@@ -190,8 +190,7 @@ fn name_for_label(label: &str) -> &str {
 }
 
 pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
-			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>,
-			    i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
+			    dbuspaths: &FilterSet<dbus::Path<'_>>, i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
 	let configs = cfg.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -368,7 +367,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 				.with_thresholds(threshold::get_thresholds_from_configs(&hwmcfg.thresholds));
 
 			// .expect() because we checked for Occupied(Active(_)) earlier
-			sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await
+			sensor::install_sensor(entry, dbuspath.clone(), sensor).await
 				.expect("sensor magically reactivated?");
 		}
 	}

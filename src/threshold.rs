@@ -216,23 +216,61 @@ fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, dbs: &Arc<Mutex<D
 	}
 }
 
-fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntfToken {
+struct ThresholdBoundIntfMsgFns {
+	value: Arc<PropChgMsgFn>,
+	alarm: Arc<PropChgMsgFn>,
+}
+
+pub struct ThresholdIntfMsgFns {
+	high: ThresholdBoundIntfMsgFns,
+	low: ThresholdBoundIntfMsgFns,
+}
+
+pub struct ThresholdIntfData {
+	pub token: SensorIntfToken,
+	pub msgfns: ThresholdIntfMsgFns,
+}
+
+fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<DBusSensor>>>, sev: ThresholdSeverity, tag: &str, getter: F) -> ThresholdBoundIntfMsgFns
+	where F: Fn(&Threshold) -> &ThresholdBound + Copy + Send + Sync + 'static
+{
+	let value = b.property(format!("{}{}", sev.to_str(), tag))
+		.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, move |t| getter(t).value))
+		.emits_changed_true()
+		.changed_msg_fn()
+		.into();
+
+	let alarm = b.property(format!("{}Alarm{}", sev.to_str(), tag))
+		.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, move |t| getter(t).alarm))
+		.emits_changed_true()
+		.changed_msg_fn()
+		.into();
+
+	ThresholdBoundIntfMsgFns {
+		value,
+		alarm,
+	}
+}
+
+fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> ThresholdIntfData {
+	let mut propchg_msgfns = None;
 	let sevstr = sev.to_str();
 	let intfname = format!("xyz.openbmc_project.Sensor.Threshold.{}", sevstr);
 
-	cr.register(intfname, |b: &mut IfaceBuilder<Arc<Mutex<DBusSensor>>>| {
-		b.property(format!("{}High", sevstr))
-			.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, |t| t.high.value));
-		b.property(format!("{}Low", sevstr))
-			.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, |t| t.low.value));
-		b.property(format!("{}AlarmHigh", sevstr))
-			.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, |t| t.high.alarm));
-		b.property(format!("{}AlarmLow", sevstr))
-			.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, |t| t.low.alarm));
-	})
+	let token = cr.register(intfname, |b: &mut IfaceBuilder<Arc<Mutex<DBusSensor>>>| {
+		propchg_msgfns = Some(ThresholdIntfMsgFns {
+			high: build_threshold_bound_intf(b, sev, "High", |t| &t.high),
+			low: build_threshold_bound_intf(b, sev, "low", |t| &t.low),
+		});
+	});
+
+	ThresholdIntfData {
+		token,
+		msgfns: propchg_msgfns.expect("propchg_msgfns not set?"),
+	}
 }
 
-pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> HashMap<ThresholdSeverity, SensorIntfToken> {
+pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> HashMap<ThresholdSeverity, ThresholdIntfData> {
 	ThresholdSeverity::iter()
 		.map(|sev| (sev, build_sensor_threshold_intf(cr, sev)))
 		.collect()

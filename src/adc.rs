@@ -84,8 +84,7 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 }
 
 pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMap,
-			    valuechg_cb: SendValueChangeFn, dbuspaths: &FilterSet<dbus::Path<'_>>)
-			    -> ErrResult<()> {
+			    dbuspaths: &FilterSet<dbus::Path<'_>>) -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
@@ -142,7 +141,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			.with_thresholds(threshold::get_thresholds_from_configs(&adccfg.thresholds));
 
 		// .expect() because we checked for Occupied(Active(_)) earlier
-		sensor::install_sensor(entry, dbuspath.clone(), sensor, valuechg_cb.clone()).await
+		sensor::install_sensor(entry, dbuspath.clone(), sensor).await
 			.expect("sensor magically reactivated?");
 	}
 	Ok(())

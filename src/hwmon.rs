@@ -376,7 +376,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 				.with_thresholds(thresholds);
 
 			// .expect() because we checked for Occupied(Active(_)) earlier
-			sensor::install_sensor(entry, dbuspath.clone(), sensor).await
+			sensor::install_sensor(entry, sensor).await
 				.expect("sensor magically reactivated?");
 		}
 	}

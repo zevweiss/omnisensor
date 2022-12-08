@@ -250,12 +250,12 @@ pub struct PhantomSensor {
 impl PhantomSensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	async fn activate(&self, path: Arc<dbus::Path<'static>>, sensor: Sensor) -> DBusSensor {
+	async fn activate(&self, sensor: Sensor) -> DBusSensor {
 		if sensor.kind != self.kind {
 			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
 				  sensor.name, self.kind, sensor.kind);
 		}
-		DBusSensor::new(path.clone(), sensor).await
+		DBusSensor::new(sensor).await
 	}
 }
 
@@ -268,7 +268,6 @@ pub enum DBusSensorState {
 }
 
 pub struct DBusSensor {
-	dbuspath: Arc<dbus::Path<'static>>,
 	pub state: DBusSensorState,
 }
 
@@ -277,9 +276,8 @@ pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
 type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
 
 impl DBusSensor {
-	async fn new(dbuspath: Arc<dbus::Path<'static>>, sensor: Sensor) -> Self {
+	async fn new(sensor: Sensor) -> Self {
 		Self {
-			dbuspath: dbuspath.clone(),
 			state: DBusSensorState::Active(sensor.start_updates().await),
 		}
 	}
@@ -349,18 +347,17 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut DBusSensorMap, key: String
 
 // Install a sensor into a given hashmap entry, returning None if the entry was
 // already occupied by an active sensor and Some(()) otherwise
-pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, dbuspath: Arc<dbus::Path<'static>>,
-			    sensor: Sensor) -> Option<()>
+pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, sensor: Sensor) -> Option<()>
 {
 	match entry {
 		DBusSensorMapEntry::Vacant(e) => {
-			e.insert(Arc::new(Mutex::new(DBusSensor::new(dbuspath.clone(), sensor).await)));
+			e.insert(Arc::new(Mutex::new(DBusSensor::new(sensor).await)));
 		},
 		DBusSensorMapEntry::Occupied(ref mut e) => {
 			let new = {
 				let dbs = e.get().lock().await;
 				match &dbs.state {
-					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(dbuspath.clone(), sensor).await)),
+					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(sensor).await)),
 					DBusSensorState::Active(_) =>  return None,
 				}
 			};

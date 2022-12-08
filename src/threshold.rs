@@ -3,7 +3,10 @@ use std::{
 	sync::Arc,
 };
 use tokio::sync::Mutex;
-use dbus::arg::prop_cast;
+use dbus::{
+	arg::prop_cast,
+	nonblock::SyncConnection,
+};
 use dbus_crossroads::{
 	Crossroads,
 	IfaceBuilder,
@@ -129,6 +132,14 @@ pub struct ThresholdBound {
 }
 
 impl ThresholdBound {
+	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
+		Self {
+			value: AutoProp::new(f64::NAN, &msgfns.value, dbuspath, conn),
+			hysteresis: f64::NAN,
+			alarm: AutoProp::new(false, &msgfns.alarm, dbuspath, conn),
+		}
+	}
+
 	fn update(&mut self, kind: ThresholdBoundType, sample: f64) {
 		if !sample.is_finite() || !self.value.get().is_finite() {
 			return;
@@ -143,16 +154,6 @@ impl ThresholdBound {
 	}
 }
 
-impl Default for ThresholdBound {
-	fn default() -> Self {
-		Self {
-			value: AutoProp::new(f64::NAN),
-			hysteresis: f64::NAN,
-			alarm: AutoProp::new(false),
-		}
-	}
-}
-
 pub struct Threshold {
 	low: ThresholdBound,
 	high: ThresholdBound,
@@ -163,23 +164,18 @@ impl Threshold {
 		self.low.update(ThresholdBoundType::Lower, sample);
 		self.high.update(ThresholdBoundType::Upper, sample);
 	}
-
-	pub fn arm_autoprops(&mut self, conn: &Arc<dbus::nonblock::SyncConnection>, dbuspath: &Arc<dbus::Path<'static>>, intf: &ThresholdIntfMsgFns) {
-		self.high.value.arm(conn, dbuspath, &intf.high.value);
-		self.low.value.arm(conn, dbuspath, &intf.low.value);
-		self.high.alarm.arm(conn, dbuspath, &intf.high.alarm);
-		self.low.alarm.arm(conn, dbuspath, &intf.low.alarm);
-	}
 }
 
 pub type Thresholds = HashMap<ThresholdSeverity, Threshold>;
 
-pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig]) -> Thresholds {
+pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &HashMap<ThresholdSeverity, ThresholdIntfData>,
+				   dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Thresholds {
 	let mut thresholds = Thresholds::new();
 	for cfg in cfgs {
+		let intf = threshold_intfs.get(&cfg.severity).expect("missing interface data for threshold severity");
 		let threshold = thresholds.entry(cfg.severity).or_insert(Threshold {
-			low: Default::default(),
-			high: Default::default(),
+			low: ThresholdBound::new(&intf.msgfns.low, dbuspath, conn),
+			high: ThresholdBound::new(&intf.msgfns.high, dbuspath, conn),
 		});
 
 		let bound = match cfg.kind {

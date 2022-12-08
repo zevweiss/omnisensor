@@ -3,6 +3,7 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
+use dbus::nonblock::SyncConnection;
 
 use crate::{
 	types::*,
@@ -14,6 +15,7 @@ use crate::{
 		Sensor,
 		SensorConfig,
 		SensorConfigMap,
+		SensorIntfData,
 		SensorType,
 	},
 	threshold,
@@ -84,7 +86,8 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 }
 
 pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMap,
-			    dbuspaths: &FilterSet<dbus::Path<'_>>) -> ErrResult<()> {
+			    dbuspaths: &FilterSet<dbus::Path<'_>>, conn: &Arc<SyncConnection>,
+			    sensor_intfs: &SensorIntfData) -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
@@ -133,12 +136,15 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			},
 		};
 
-		let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, fd)
+		let thresholds = threshold::get_thresholds_from_configs(&adccfg.thresholds,
+									&sensor_intfs.thresholds, dbuspath, conn);
+
+		let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, fd, sensor_intfs, dbuspath, conn)
 			.with_poll_interval(adccfg.poll_interval)
 			.with_scale(adccfg.scale)
 			.with_bridge_gpio(bridge_gpio)
 			.with_power_state(adccfg.power_state)
-			.with_thresholds(threshold::get_thresholds_from_configs(&adccfg.thresholds));
+			.with_thresholds(thresholds);
 
 		// .expect() because we checked for Occupied(Active(_)) earlier
 		sensor::install_sensor(entry, dbuspath.clone(), sensor).await

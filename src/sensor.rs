@@ -5,6 +5,7 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
+use dbus::nonblock::SyncConnection;
 use tokio::sync::Mutex;
 use glob;
 
@@ -108,12 +109,14 @@ pub struct Sensor {
 }
 
 impl Sensor {
-	pub fn new(name: &str, kind: SensorType, fd: std::fs::File) -> Self {
+	pub fn new(name: &str, kind: SensorType, fd: std::fs::File,
+		   intfs: &SensorIntfData, dbuspath: &Arc<dbus::Path<'static>>,
+		   conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			name: name.into(),
 			kind,
 			fd,
-			cache: AutoProp::new(f64::NAN),
+			cache: AutoProp::new(f64::NAN, &intfs.value.msgfns.value, dbuspath, conn),
 			bridge_gpio: None,
 			i2cdev: None,
 			poll_interval: Duration::from_secs(1),
@@ -227,21 +230,6 @@ impl Sensor {
 			thresholds: std::mem::take(&mut self.thresholds),
 		})
 	}
-
-	fn arm_autoprops(&mut self, conn: &Arc<dbus::nonblock::SyncConnection>, dbuspath: &Arc<dbus::Path<'static>>, intfs: &SensorIntfData) {
-		self.cache.arm(conn, dbuspath, &intfs.value.msgfns.value);
-		for (sev, threshold) in self.thresholds.iter_mut() {
-			let threshold_intf = match intfs.thresholds.get(sev) {
-				Some(i) => i,
-				_ => {
-					eprintln!("no interface found for {:?}?", sev);
-					continue;
-				},
-			};
-
-			threshold.arm_autoprops(conn, dbuspath, &threshold_intf.msgfns)
-		}
-	}
 }
 
 impl Drop for Sensor {
@@ -304,18 +292,6 @@ impl DBusSensor {
 		match &self.state {
 			DBusSensorState::Active(s) => s.lock().await.kind,
 			DBusSensorState::Phantom(p) => p.kind,
-		}
-	}
-
-	pub async fn arm_autoprops(&mut self, conn: &Arc<dbus::nonblock::SyncConnection>, intfs: &SensorIntfData) {
-		match &self.state {
-			DBusSensorState::Active(s) => {
-				 let mut s = s.lock().await;
-				s.arm_autoprops(conn, &self.dbuspath, intfs);
-			},
-			_ => {
-				// FIXME!  what happens to AutoProps when things go phantom?
-			},
 		}
 	}
 }
@@ -483,16 +459,17 @@ pub async fn deactivate(sensors: &mut DBusSensorMap) {
 }
 
 pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
-			filter: &FilterSet<dbus::Path<'static>>, i2cdevs: &Mutex<i2c::I2CDeviceMap>) {
+			filter: &FilterSet<dbus::Path<'static>>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
+			conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
 	let cfg = cfg.lock().await;
 	let mut sensors = sensors.lock().await;
 
-	adc::update_sensors(&cfg, &mut sensors, filter).await.unwrap_or_else(|e| {
+	adc::update_sensors(&cfg, &mut sensors, filter, conn, intfs).await.unwrap_or_else(|e| {
 		eprintln!("Failed to update ADC sensors: {}", e);
 	});
 
 	let mut i2cdevs = i2cdevs.lock().await;
-	hwmon::update_sensors(&cfg, &mut sensors, filter, &mut i2cdevs).await.unwrap_or_else(|e| {
+	hwmon::update_sensors(&cfg, &mut sensors, filter, &mut i2cdevs, intfs, conn).await.unwrap_or_else(|e| {
 		eprintln!("Failed to update hwmon sensors: {}", e);
 	});
 }

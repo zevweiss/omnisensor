@@ -144,7 +144,7 @@ pub async fn init_host_state(bus: &nonblock::SyncConnection) {
 }
 
 pub async fn register_power_signal_handler<F, R>(bus: &nonblock::SyncConnection, cb: F) -> ErrResult<Vec<nonblock::MsgMatch>>
-	where F: Fn(PowerState, bool) -> R + Send + Copy + Sync + 'static,
+	where F: FnOnce(PowerState, bool) -> R + Send + Copy + Sync + 'static,
 	      R: futures::Future<Output = ()> + Send
 {
 	use dbus_properties::*;

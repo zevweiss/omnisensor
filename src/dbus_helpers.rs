@@ -6,37 +6,23 @@ use dbus::{
 
 use crate::types::*;
 
-struct PropChgCallback {
+// A dbus property that owns its own data and automatically sends
+// property-change signals on updates
+pub struct AutoProp<A> {
+	data: A,
 	msgfn: Arc<PropChgMsgFn>,
 	dbuspath: Arc<dbus::Path<'static>>,
 	conn: Arc<SyncConnection>,
 }
 
-// A dbus property that owns its own data and automatically sends
-// property-change signals on updates
-pub struct AutoProp<A> {
-	data: A,
-	callback: Option<PropChgCallback>,
-}
-
 impl<A: Copy + PartialEq + dbus::arg::RefArg> AutoProp<A> {
-	pub fn new(data: A) -> Self {
+	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			data,
-			callback: None,
-		}
-	}
-
-	pub fn arm(&mut self, conn: &Arc<SyncConnection>, dbuspath: &Arc<dbus::Path<'static>>, msgfn: &Arc<PropChgMsgFn>) {
-		if self.callback.is_some() {
-			// oog, FIXME
-			panic!("already-armed AutoProp re-armed");
-		}
-		self.callback = Some(PropChgCallback {
 			msgfn: msgfn.clone(),
 			dbuspath: dbuspath.clone(),
 			conn: conn.clone(),
-		})
+		}
 	}
 
 	pub fn get(&self) -> A {
@@ -51,17 +37,12 @@ impl<A: Copy + PartialEq + dbus::arg::RefArg> AutoProp<A> {
 	}
 
 	fn send_propchg(&self) {
-		let cb = match &self.callback {
-			Some(cb) => cb,
-			_ => return,
-		};
-
-		if let Some(msg) = (cb.msgfn)(&cb.dbuspath, &dbus::arg::Variant(self.data)) {
-			if cb.conn.send(msg).is_err() {
-				eprintln!("Failed to send PropertiesChanged message for {}", cb.dbuspath);
+		if let Some(msg) = (self.msgfn)(&self.dbuspath, &dbus::arg::Variant(self.data)) {
+			if self.conn.send(msg).is_err() {
+				eprintln!("Failed to send PropertiesChanged message for {}", self.dbuspath);
 			}
 		} else {
-			eprintln!("Failed to create PropertiesChanged message for {}", cb.dbuspath);
+			eprintln!("Failed to create PropertiesChanged message for {}", self.dbuspath);
 		}
 	}
 }

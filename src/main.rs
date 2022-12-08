@@ -8,7 +8,10 @@ use dbus::{
 	channel::MatchingReceiver,
 	message::MatchRule,
 	nonblock,
-	nonblock::stdintf::org_freedesktop_dbus::ObjectManager,
+	nonblock::{
+		SyncConnection,
+		stdintf::org_freedesktop_dbus::ObjectManager,
+	},
 };
 use dbus_crossroads::Crossroads;
 use futures::future;
@@ -30,12 +33,13 @@ use sensor::{
 	DBusSensorState,
 	SensorConfig,
 	SensorConfigMap,
+	SensorIntfData,
 };
 
 const DBUS_NAME: &'static str = "xyz.openbmc_project.FooSensor";
 const ENTITY_MANAGER_NAME: &'static str = "xyz.openbmc_project.EntityManager";
 
-async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap> {
+async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, "/xyz/openbmc_project/inventory",
 				     Duration::from_secs(30), bus);
 	let objs = p.get_managed_objects().await?;
@@ -90,8 +94,8 @@ async fn get_config(bus: &nonblock::SyncConnection) -> ErrResult<SensorConfigMap
 	Ok(result)
 }
 
-async fn register_properties_changed_handler<H, R>(bus: &nonblock::SyncConnection, cb: H) -> ErrResult<nonblock::MsgMatch>
-	where H: Fn(dbus::message::Message, String, dbus::arg::PropMap) -> R + Send + Copy + Sync + 'static,
+async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) -> ErrResult<nonblock::MsgMatch>
+	where H: FnOnce(dbus::message::Message, String, dbus::arg::PropMap) -> R + Send + Copy + Sync + 'static,
 	      R: futures::Future<Output = ()> + Send
 {
 	use dbus::message::SignalArgs;
@@ -115,9 +119,9 @@ async fn register_properties_changed_handler<H, R>(bus: &nonblock::SyncConnectio
 	Ok(signal)
 }
 
-async fn handle_propchange(bus: &nonblock::SyncConnection, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
+async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
 			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>,
-			   msg: dbus::message::Message) {
+			   msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
 	let path = match msg.path() {
 		Some(p) => p.into_static(),
 		_ => return,
@@ -161,7 +165,7 @@ async fn handle_propchange(bus: &nonblock::SyncConnection, cfg: &Mutex<SensorCon
 		*cfg.lock().await = newcfg;
 	}
 
-	sensor::update_all(cfg, sensors, &filter, i2cdevs).await;
+	sensor::update_all(cfg, sensors, &filter, i2cdevs, bus, sensor_intfs).await;
 }
 
 #[tokio::main]
@@ -183,7 +187,7 @@ async fn main() -> ErrResult<()> {
 	cr.set_async_support(Some((sysbus.clone(), Box::new(|x| { tokio::spawn(x); }))));
 	cr.set_object_manager_support(Some(sysbus.clone()));
 
-	let sensor_intfs = sensor::build_sensor_intfs(&mut cr);
+	let sensor_intfs: &_ = Box::leak(Box::new(sensor::build_sensor_intfs(&mut cr)));
 
 	powerstate::init_host_state(sysbus).await;
 
@@ -198,7 +202,7 @@ async fn main() -> ErrResult<()> {
 	let i2cdevs = globalize(i2c::I2CDeviceMap::new());
 	let cfg = globalize(get_config(sysbus).await?); // FIXME (error handling)
 
-	sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs).await;
+	sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, sysbus, sensor_intfs).await;
 
 	cr.insert("/xyz", &[], ());
 	cr.insert("/xyz/openbmc_project", &[], ());
@@ -207,8 +211,7 @@ async fn main() -> ErrResult<()> {
 	let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 
 	for (name, dbs) in sensors.lock().await.iter() {
-		let mut inner = dbs.lock().await;
-		inner.arm_autoprops(sysbus, &sensor_intfs).await;
+		let inner = dbs.lock().await;
 		let s = match inner.state {
 			DBusSensorState::Active(ref s) => s.lock().await,
 			DBusSensorState::Phantom(_) => {
@@ -234,7 +237,7 @@ async fn main() -> ErrResult<()> {
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
-			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs).await;
+			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, &sysbus, sensor_intfs).await;
 		} else {
 			let mut sensors = sensors.lock().await;
 			sensor::deactivate(&mut sensors).await;
@@ -247,7 +250,7 @@ async fn main() -> ErrResult<()> {
 	static changed_paths: Mutex<Option<HashSet<dbus::Path>>> = Mutex::const_new(None);
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
-		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, msg).await;
+		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, msg, sensor_intfs).await;
 	};
 
 	let _propsignals = register_properties_changed_handler(sysbus, prophandler).await?;

@@ -1,8 +1,12 @@
 use std::{
 	collections::{HashMap, HashSet},
+	sync::Arc,
 	time::Duration,
 };
-use dbus::arg::RefArg;
+use dbus::{
+	arg::RefArg,
+	nonblock::SyncConnection,
+};
 use glob;
 use phf::phf_set;
 
@@ -20,6 +24,7 @@ use crate::{
 		Sensor,
 		SensorConfig,
 		SensorConfigMap,
+		SensorIntfData,
 		SensorType,
 	},
 	threshold,
@@ -190,7 +195,8 @@ fn name_for_label(label: &str) -> &str {
 }
 
 pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
-			    dbuspaths: &FilterSet<dbus::Path<'_>>, i2cdevs: &mut I2CDeviceMap) ->ErrResult<()> {
+			    dbuspaths: &FilterSet<dbus::Path<'_>>, i2cdevs: &mut I2CDeviceMap,
+			    sensor_intfs: &SensorIntfData, conn: &Arc<SyncConnection>) ->ErrResult<()> {
 	let configs = cfg.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -360,11 +366,14 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 				},
 			};
 
-			let sensor = Sensor::new(&sensorname, file.kind, fd)
+			let thresholds = threshold::get_thresholds_from_configs(&hwmcfg.thresholds,
+										&sensor_intfs.thresholds, dbuspath, conn);
+
+			let sensor = Sensor::new(&sensorname, file.kind, fd, sensor_intfs, dbuspath, conn)
 				.with_poll_interval(hwmcfg.poll_interval)
 				.with_i2cdev(i2cdev.clone())
 				.with_power_state(hwmcfg.power_state)
-				.with_thresholds(threshold::get_thresholds_from_configs(&hwmcfg.thresholds));
+				.with_thresholds(thresholds);
 
 			// .expect() because we checked for Occupied(Active(_)) earlier
 			sensor::install_sensor(entry, dbuspath.clone(), sensor).await

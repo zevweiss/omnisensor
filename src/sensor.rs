@@ -7,7 +7,6 @@ use std::{
 };
 use dbus::nonblock::SyncConnection;
 use tokio::sync::Mutex;
-use glob;
 
 use crate::{
 	types::*,
@@ -444,7 +443,7 @@ pub async fn deactivate(sensors: &mut DBusSensorMap) {
 			if sensor.active_now().await {
 				continue;
 			}
-			let nrefs = Arc::strong_count(&arcsensor);
+			let nrefs = Arc::strong_count(arcsensor);
 			if nrefs > 1 {
 				eprintln!("{} refcount = {} at deactivation, will leak!", name, nrefs);
 			}

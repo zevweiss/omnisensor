@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Duration};
 use dbus::arg::{Variant, RefArg};
-use gpiocdev;
 
 use crate::types::ErrResult;
 
@@ -65,7 +64,7 @@ impl BridgeGPIO {
 		};
 
 		// clunk...there's *got* to be a better way of achieving this
-		fn set_sense<'a>(builder: &'a mut gpiocdev::request::Builder, pol: Polarity) -> &'a mut gpiocdev::request::Builder {
+		fn set_sense(builder: &mut gpiocdev::request::Builder, pol: Polarity) -> &mut gpiocdev::request::Builder {
 			match pol {
 				Polarity::ActiveHigh => builder.as_active_high(),
 				Polarity::ActiveLow => builder.as_active_low(),

@@ -47,7 +47,7 @@ impl ThresholdSeverity {
 		}
 	}
 
-	fn to_str(&self) -> &'static str {
+	fn to_str(self) -> &'static str {
 		match self {
 			Self::Warning => "Warning",
 			Self::Critical => "Critical",
@@ -88,11 +88,9 @@ impl ThresholdConfig {
 	fn from_dbus(props: &dbus::arg::PropMap) -> Option<Self> {
 		// TODO: issue errors on missing/invalid config keys
 		let kind = prop_cast::<String>(props, "Direction")
-			.map(|s| ThresholdBoundType::from_str(s))
-			.flatten()?;
+			.and_then(|s| ThresholdBoundType::from_str(s))?;
 		let severity = prop_cast::<f64>(props, "Severity")
-			.map(|n| ThresholdSeverity::from_f64(*n))
-			.flatten()?;
+			.and_then(|n| ThresholdSeverity::from_f64(*n))?;
 		let value = *prop_cast::<f64>(props, "Value")?;
 		let hysteresis = *prop_cast::<f64>(props, "Hysteresis")
 			.unwrap_or(&f64::NAN);
@@ -117,7 +115,7 @@ pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::
 		let Some(props) = intfs.get(&intf) else {
 			break;
 		};
-		if let Some(thr) = ThresholdConfig::from_dbus(&props) {
+		if let Some(thr) = ThresholdConfig::from_dbus(props) {
 			thresholds.push(thr);
 		}
 	}

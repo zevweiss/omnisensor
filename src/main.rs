@@ -36,8 +36,8 @@ use sensor::{
 	SensorIntfData,
 };
 
-const DBUS_NAME: &'static str = "xyz.openbmc_project.FooSensor";
-const ENTITY_MANAGER_NAME: &'static str = "xyz.openbmc_project.EntityManager";
+const DBUS_NAME: &str = "xyz.openbmc_project.FooSensor";
+const ENTITY_MANAGER_NAME: &str = "xyz.openbmc_project.EntityManager";
 
 async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, "/xyz/openbmc_project/inventory",
@@ -230,7 +230,7 @@ async fn main() -> ErrResult<()> {
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
-			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, &sysbus, sensor_intfs).await;
+			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, sysbus, sensor_intfs).await;
 		} else {
 			let mut sensors = sensors.lock().await;
 			sensor::deactivate(&mut sensors).await;

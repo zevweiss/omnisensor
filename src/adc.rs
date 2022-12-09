@@ -44,7 +44,7 @@ impl ADCSensorConfig {
 		let scale: f64 = prop_cast(basecfg, "ScaleFactor").copied().unwrap_or(1.0);
 		let power_state = PowerState::from_dbus(basecfg.get("PowerState"))?;
 		let bridge_gpio = intfs.get("xyz.openbmc_project.Configuration.ADC.BridgeGpio0")
-			.map(BridgeGPIOConfig::from_dbus).flatten().map(Arc::new);
+			.and_then(BridgeGPIOConfig::from_dbus).map(Arc::new);
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 
 		if !scale.is_finite() || scale == 0.0 {
@@ -64,7 +64,7 @@ impl ADCSensorConfig {
 	}
 }
 
-const IIO_HWMON_PATH: &'static str = "/sys/devices/platform/iio-hwmon";
+const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
 // Returns a Vec of ... ordered by index (inX_input, E-M config
 // "Index" key)
@@ -125,7 +125,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			None => None,
 		};
 
-		let fd = match std::fs::File::open(&path) {
+		let fd = match std::fs::File::open(path) {
 			Ok(f) => f,
 			Err(e) => {
 				eprintln!("Failed to open {} for {}: {}",

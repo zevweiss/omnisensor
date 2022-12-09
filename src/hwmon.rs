@@ -7,7 +7,6 @@ use dbus::{
 	arg::RefArg,
 	nonblock::SyncConnection,
 };
-use glob;
 use phf::phf_set;
 
 use crate::{
@@ -153,7 +152,7 @@ impl HwmonSensorConfig {
 			HwmonSubType::PSU => {
 				let subname: &str = self.name_overrides.get(label)
 					.map(|s| s.as_str())
-					.unwrap_or(name_for_label(&label));
+					.unwrap_or_else(|| name_for_label(label));
 
 				Some(format!("{} {}", self.names[0], subname))
 			},

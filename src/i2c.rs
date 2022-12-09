@@ -45,7 +45,7 @@ pub struct I2CDeviceParams {
 	pub devtype: String,
 }
 
-const I2C_DEV_DIR: &'static str = "/sys/bus/i2c/devices";
+const I2C_DEV_DIR: &str = "/sys/bus/i2c/devices";
 
 impl I2CDeviceParams {
 	pub fn from_dbus(cfg: &dbus::arg::PropMap, r#type: &str) -> ErrResult<Option<Self>> {
@@ -174,7 +174,7 @@ pub type I2CDeviceMap = HashMap<I2CDeviceParams, std::sync::Weak<I2CDevice>>;
 // Find an existing I2CDevice in devmap for the given params, or
 // instantiate one and add it to devmap if not.
 pub fn get_i2cdev(devmap: &mut I2CDeviceMap, params: &I2CDeviceParams) -> ErrResult<Option<Arc<I2CDevice>>> {
-	let d = devmap.get(params).map(|w| w.upgrade()).flatten();
+	let d = devmap.get(params).and_then(|w| w.upgrade());
 	if d.is_some() {
 		Ok(d)
 	} else {

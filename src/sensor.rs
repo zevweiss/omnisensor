@@ -5,6 +5,7 @@ use std::{
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
+use replace_with::replace_with_or_abort;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -231,9 +232,7 @@ impl Sensor {
 		dbs
 	}
 
-	// FIXME: wanted this to consume self, not take by reference, but can't
-	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	fn deactivate(&mut self) -> DBusSensorState {
+	fn deactivate(mut self) -> DBusSensorState {
 		DBusSensorState::Phantom(PhantomSensor {
 			kind: self.kind,
 			thresholds: std::mem::take(&mut self.thresholds),
@@ -289,8 +288,19 @@ impl DBusSensor {
 		sensor.start_updates().await
 	}
 
-	fn update_state(&mut self, new: DBusSensorState) {
-		drop(std::mem::replace(&mut self.state, new))
+	fn deactivate(&mut self) {
+		let transfer = |s: DBusSensorState| {
+			match s {
+				DBusSensorState::Active(a) => {
+					a.deactivate()
+				},
+				_ => {
+					eprintln!("tried to deactivate a non-active sensor");
+					s
+				},
+			}
+		};
+		replace_with_or_abort(&mut self.state, transfer);
 	}
 
 	fn kind(&self) -> SensorType {
@@ -443,14 +453,13 @@ pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfDat
 pub async fn deactivate(sensors: &mut DBusSensorMap) {
 	for dbs in sensors.values_mut() {
 		let dbs = &mut *dbs.lock().await;
-		let DBusSensorState::Active(ref mut sensor) = &mut dbs.state else {
+		let DBusSensorState::Active(ref sensor) = &dbs.state else {
 			continue;
 		};
 		if sensor.active_now().await {
 			continue;
 		}
-		let new = sensor.deactivate();
-		dbs.update_state(new);
+		dbs.deactivate();
 	}
 }
 

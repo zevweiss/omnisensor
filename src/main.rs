@@ -206,7 +206,7 @@ async fn main() -> ErrResult<()> {
 	for (name, dbs) in sensors.lock().await.iter() {
 		let inner = dbs.lock().await;
 		let s = match inner.state {
-			DBusSensorState::Active(ref s) => s.lock().await,
+			DBusSensorState::Active(ref s) => s,
 			DBusSensorState::Phantom(_) => {
 				eprintln!("{}: phantom sensor during initialization?", name);
 				continue;

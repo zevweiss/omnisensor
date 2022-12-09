@@ -217,7 +217,7 @@ fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, dbs: &Arc<Mutex<D
 		};
 
 		match &dbs.state {
-			DBusSensorState::Active(s) => sendvalue(&s.lock().await.thresholds),
+			DBusSensorState::Active(s) => sendvalue(&s.thresholds),
 			DBusSensorState::Phantom(p) => sendvalue(&p.thresholds),
 		}
 	}

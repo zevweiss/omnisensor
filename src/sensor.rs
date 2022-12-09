@@ -1,7 +1,6 @@
 use std::{
 	collections::HashMap,
 	io::{Read, Seek},
-	ops::DerefMut,
 	sync::Arc,
 	time::Duration,
 };
@@ -187,22 +186,27 @@ impl Sensor {
 		Ok(())
 	}
 
-	async fn start_updates(self) -> Arc<Mutex<Self>> {
+	async fn start_updates(self) -> Arc<Mutex<DBusSensor>> {
 		let mut timer = tokio::time::interval(self.poll_interval);
-		let s = Arc::new(Mutex::new(self));
+		let dbs = Arc::new(Mutex::new(DBusSensor { state: DBusSensorState::Active(self) }));
 
 		// Use a weak reference in the update task closure so
 		// it doesn't hold a strong reference to the sensor
 		// (which would create a reference loop via
 		// s.update_task and make it un-droppable)
-		let w = Arc::downgrade(&s);
+		let w = Arc::downgrade(&dbs);
 
 		let update_loop = async move {
 			loop {
 				if let Some(t) = w.upgrade() {
-					let mut sensor = t.lock().await;
-					if let Err(e) = sensor.update().await {
-						eprintln!("failed to update {}: {}", sensor.name, e);
+					let mut dbs = t.lock().await;
+
+					if let DBusSensorState::Active(ref mut sensor) = dbs.state {
+						if let Err(e) = sensor.update().await {
+							eprintln!("failed to update {}: {}", sensor.name, e);
+						}
+					} else {
+						eprintln!("update task running on phantom sensor");
 					}
 				}
 
@@ -214,11 +218,17 @@ impl Sensor {
 			}
 		};
 		{
-			let mut r = s.lock().await;
-			let r = r.deref_mut();
-			r.update_task = Some(tokio::spawn(update_loop));
+			let mut dbs = dbs.lock().await;
+			match dbs.state {
+				DBusSensorState::Active(ref mut s) => {
+					s.update_task = Some(tokio::spawn(update_loop));
+				},
+				_ => {
+					eprintln!("sensor went AWOL while starting update task");
+				},
+			};
 		}
-		s
+		dbs
 	}
 
 	// FIXME: wanted this to consume self, not take by reference, but can't
@@ -249,7 +259,7 @@ pub struct PhantomSensor {
 impl PhantomSensor {
 	// FIXME: wanted this to consume self, not take by reference, but can't
 	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	async fn activate(&self, sensor: Sensor) -> DBusSensor {
+	async fn activate(&self, sensor: Sensor) -> Arc<Mutex<DBusSensor>> {
 		if sensor.kind != self.kind {
 			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
 				  sensor.name, self.kind, sensor.kind);
@@ -262,7 +272,7 @@ impl PhantomSensor {
 // underlying ("real") sensor goes away (e.g. if it's PowerState::On
 // and the host gets shut off).
 pub enum DBusSensorState {
-	Active(Arc<Mutex<Sensor>>),
+	Active(Sensor),
 	Phantom(PhantomSensor),
 }
 
@@ -275,19 +285,17 @@ pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
 type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
 
 impl DBusSensor {
-	async fn new(sensor: Sensor) -> Self {
-		Self {
-			state: DBusSensorState::Active(sensor.start_updates().await),
-		}
+	async fn new(sensor: Sensor) -> Arc<Mutex<Self>> {
+		sensor.start_updates().await
 	}
 
 	fn update_state(&mut self, new: DBusSensorState) {
 		drop(std::mem::replace(&mut self.state, new))
 	}
 
-	async fn kind(&self) -> SensorType {
+	fn kind(&self) -> SensorType {
 		match &self.state {
-			DBusSensorState::Active(s) => s.lock().await.kind,
+			DBusSensorState::Active(s) => s.kind,
 			DBusSensorState::Phantom(p) => p.kind,
 		}
 	}
@@ -350,13 +358,13 @@ pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, sensor: Sensor) -
 {
 	match entry {
 		DBusSensorMapEntry::Vacant(e) => {
-			e.insert(Arc::new(Mutex::new(DBusSensor::new(sensor).await)));
+			e.insert(DBusSensor::new(sensor).await);
 		},
 		DBusSensorMapEntry::Occupied(ref mut e) => {
 			let new = {
 				let dbs = e.get().lock().await;
 				match &dbs.state {
-					DBusSensorState::Phantom(p) => Arc::new(Mutex::new(p.activate(sensor).await)),
+					DBusSensorState::Phantom(p) => p.activate(sensor).await,
 					DBusSensorState::Active(_) =>  return None,
 				}
 			};
@@ -386,7 +394,7 @@ fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfDat
 				let dbs = dbs.clone();
 				async move {
 					let u = dbs.lock().await
-						.kind().await
+						.kind()
 						.dbus_unit_str();
 					ctx.reply(Ok(u.to_string()))
 				}
@@ -399,7 +407,7 @@ fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfDat
 				let dbs = dbs.clone();
 				async move {
 					let x = match &dbs.lock().await.state {
-						DBusSensorState::Active(s) => s.lock().await.cache.get(),
+						DBusSensorState::Active(s) => s.cache.get(),
 						DBusSensorState::Phantom(_) => f64::NAN,
 					};
 					ctx.reply(Ok(x))
@@ -433,22 +441,15 @@ pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfDat
 }
 
 pub async fn deactivate(sensors: &mut DBusSensorMap) {
-	for (name, dbs) in sensors.iter_mut() {
+	for dbs in sensors.values_mut() {
 		let dbs = &mut *dbs.lock().await;
-		let new = {
-			let DBusSensorState::Active(arcsensor) = &dbs.state else {
-				continue;
-			};
-			let mut sensor = arcsensor.lock().await;
-			if sensor.active_now().await {
-				continue;
-			}
-			let nrefs = Arc::strong_count(arcsensor);
-			if nrefs > 1 {
-				eprintln!("{} refcount = {} at deactivation, will leak!", name, nrefs);
-			}
-			sensor.deactivate()
+		let DBusSensorState::Active(ref mut sensor) = &mut dbs.state else {
+			continue;
 		};
+		if sensor.active_now().await {
+			continue;
+		}
+		let new = sensor.deactivate();
 		dbs.update_state(new);
 	}
 }

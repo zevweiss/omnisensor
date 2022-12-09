@@ -58,10 +58,9 @@ impl I2CDeviceParams {
 								     "Bus and Address must both be specified"))),
 		};
 		let get_u16 = |v: &Variant<Box<dyn RefArg>>| -> ErrResult<u16> {
-			let x = match v.as_u64() {
-				Some(x) => x,
-				_ => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-									     "Bus and Address must both be u64"))),
+			let Some(x) = v.as_u64() else {
+				return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
+									"Bus and Address must both be u64")));
 			};
 			Ok(x.try_into()?)
 		};

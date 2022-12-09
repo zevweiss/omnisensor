@@ -59,24 +59,18 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 
 			match cfgtype {
 				"ADC" => {
-					let cfg = match adc::ADCSensorConfig::from_dbus(props, k, &submap) {
-						Some(c) => c,
-						_ => {
-							eprintln!("{}: malformed config data", path);
-							continue;
-						},
+					let Some(cfg) = adc::ADCSensorConfig::from_dbus(props, k, &submap) else {
+						eprintln!("{}: malformed config data", path);
+						continue;
 					};
 					println!("\t{:?}", cfg);
 					result.insert(Arc::new(path), SensorConfig::ADC(cfg));
 					continue 'objloop;
 				}
 				"LM25066"|"W83773G"|"NCT6779" => {
-					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) {
-						Some(c) => c,
-						_ => {
-							eprintln!("{}: malformed config data", path);
-							continue;
-						},
+					let Some(cfg) = hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) else {
+						eprintln!("{}: malformed config data", path);
+						continue;
 					};
 					println!("\t{:?}", cfg);
 					result.insert(Arc::new(path), SensorConfig::Hwmon(cfg));
@@ -122,9 +116,8 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
 			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>,
 			   msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
-	let path = match msg.path() {
-		Some(p) => p.into_static(),
-		_ => return,
+	let Some(path) = msg.path().map(|p| p.into_static()) else {
+		return;
 	};
 
 	{

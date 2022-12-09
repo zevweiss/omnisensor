@@ -23,9 +23,8 @@ impl PowerState {
 	// defaulted) and it being present but invalid (which gets
 	// rejected).
 	pub fn from_dbus(prop: Option<&Variant<Box<dyn RefArg>>>) -> Option<Self> {
-		let var = match prop {
-			None => return Some(Self::Always),
-			Some(var) => var,
+		let Some(var) = prop else {
+			return Some(Self::Always);
 		};
 		match var.as_str() {
 			Some("Always") => Some(Self::Always),
@@ -163,9 +162,9 @@ pub async fn register_power_signal_handler<F, R>(bus: &nonblock::SyncConnection,
 				return; // FIXME: eprintln!()?
 			}
 
-			let newstate = match dbus::arg::prop_cast::<String>(&props, prop.property) {
-				Some(s) => (prop.is_active)(s),
-				_ => return,
+			let Some(newstate) = dbus::arg::prop_cast::<String>(&props, prop.property)
+				.map(|s| (prop.is_active)(s)) else {
+				return;
 			};
 
 			{

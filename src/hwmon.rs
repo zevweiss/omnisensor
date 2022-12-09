@@ -290,22 +290,16 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 						};
 
 						let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
-						let kind = match SensorType::from_hwmon_typetag(typetag) {
-							Some(t) => t,
-							_ => {
-								skip();
-								return None;
-							},
+						let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
+							skip();
+							return None;
 						};
 
 						// unwrap because we're stripping a prefix
 						// that we know is there
-						let idx = match base.strip_prefix(typetag).unwrap().parse::<usize>() {
-							Ok(n) => n,
-							_ => {
-								skip();
-								return None;
-							},
+						let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
+							skip();
+							return None;
 						};
 
 						Some(HwmonFile{
@@ -345,17 +339,13 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 				continue;
 			}
 
-			let sensorname = match hwmcfg.sensor_name(idx, &label) {
-				Some(n) => n,
-				_ => {
-					eprintln!("{}: {} does not appear to be in use, skipping", mainname, label);
-					continue;
-				},
+			let Some(sensorname) = hwmcfg.sensor_name(idx, &label) else {
+				eprintln!("{}: {} does not appear to be in use, skipping", mainname, label);
+				continue;
 			};
 
-			let entry = match sensor::get_nonactive_sensor_entry(sensors, sensorname.clone()).await {
-				Some(e) => e,
-				None => continue,
+			let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, sensorname.clone()).await else {
+				continue;
 			};
 
 			let fd = match std::fs::File::open(&file.abspath) {

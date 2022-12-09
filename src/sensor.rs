@@ -437,9 +437,8 @@ pub async fn deactivate(sensors: &mut DBusSensorMap) {
 	for (name, dbs) in sensors.iter_mut() {
 		let dbs = &mut *dbs.lock().await;
 		let new = {
-			let arcsensor = match &dbs.state {
-				DBusSensorState::Active(s) => s,
-				DBusSensorState::Phantom(_) => continue,
+			let DBusSensorState::Active(arcsensor) = &dbs.state else {
+				continue;
 			};
 			let mut sensor = arcsensor.lock().await;
 			if sensor.active_now().await {

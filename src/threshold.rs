@@ -114,9 +114,8 @@ pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::
 	let mut thresholds = vec![];
 	for tidx in 0.. {
 		let intf = format!("{}.Thresholds{}", baseintf, tidx);
-		let props = match intfs.get(&intf) {
-			Some(pm) => pm,
-			_ => break,
+		let Some(props) = intfs.get(&intf) else {
+			break;
 		};
 		if let Some(thr) = ThresholdConfig::from_dbus(&props) {
 			thresholds.push(thr);

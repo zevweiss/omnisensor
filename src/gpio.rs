@@ -12,9 +12,8 @@ enum Polarity {
 
 impl Polarity {
 	pub fn from_dbus(prop: Option<&Variant<Box<dyn RefArg>>>) -> Option<Self> {
-		let var = match prop {
-			None => return Some(Self::ActiveHigh),
-			Some(var) => var,
+		let Some(var) = prop else {
+			return Some(Self::ActiveHigh);
 		};
 		match var.as_str() {
 			Some("High") => Some(Self::ActiveHigh),
@@ -59,13 +58,10 @@ pub struct BridgeGPIOActivation<'a> {
 
 impl BridgeGPIO {
 	pub fn from_config(cfg: Arc<BridgeGPIOConfig>) -> ErrResult<Self> {
-		let line = match gpiocdev::find_named_line(&cfg.name) {
-			Some(line) => line,
-			None => {
-				eprintln!("failed to find bridge GPIO {}", cfg.name);
-				return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
-									"GPIO not found")));
-			},
+		let Some(line) = gpiocdev::find_named_line(&cfg.name) else {
+			eprintln!("failed to find bridge GPIO {}", cfg.name);
+			return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
+								"GPIO not found")));
 		};
 
 		// clunk...there's *got* to be a better way of achieving this

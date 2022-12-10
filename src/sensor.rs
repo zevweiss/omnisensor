@@ -156,6 +156,8 @@ pub struct Sensor {
 	scale: f64,
 
 	cache: AutoProp<f64>,
+	minvalue: AutoProp<f64>,
+	maxvalue: AutoProp<f64>,
 
 	io: Option<SensorIOCtx>,
 }
@@ -167,12 +169,16 @@ impl Sensor {
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
 		let dbuspath = Arc::new(SensorPath(dbuspath.into()));
 		let cache = AutoProp::new(f64::NAN, &intfs.value.msgfns.value, &dbuspath, conn);
+		let minvalue = AutoProp::new(f64::NAN, &intfs.value.msgfns.minvalue, &dbuspath, conn);
+		let maxvalue = AutoProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
 
 		Self {
 			name: name.into(),
 			dbuspath,
 			kind,
 			cache,
+			minvalue,
+			maxvalue,
 			poll_interval: Duration::from_secs(1),
 			power_state: PowerState::Always,
 			thresholds: ThresholdArr::default(),
@@ -202,6 +208,16 @@ impl Sensor {
 
 	pub fn with_scale(mut self, scale: f64) -> Self {
 		self.scale = scale * self.kind.hwmon_scale();
+		self
+	}
+
+	pub fn with_maxval(mut self, max: f64) -> Self {
+		self.maxvalue.set(max);
+		self
+	}
+
+	pub fn with_minval(mut self, min: f64) -> Self {
+		self.minvalue.set(min);
 		self
 	}
 
@@ -386,6 +402,8 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 pub struct ValueIntfMsgFns {
 	pub unit: Arc<PropChgMsgFn>,
 	pub value: Arc<PropChgMsgFn>,
+	pub minvalue: Arc<PropChgMsgFn>,
+	pub maxvalue: Arc<PropChgMsgFn>,
 }
 
 pub struct ValueIntfData {
@@ -415,6 +433,8 @@ fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfDat
 		propchg_msgfns = Some(ValueIntfMsgFns {
 			unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
 			value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
+			minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get()).into(),
+			maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get()).into(),
 		});
 	});
 

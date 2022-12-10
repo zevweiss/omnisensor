@@ -142,6 +142,8 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 				.with_scale(adccfg.scale)
 				.with_power_state(adccfg.power_state)
 				.with_thresholds_from(&adccfg.thresholds, &sensor_intfs.thresholds, conn)
+				.with_minval(0.0)
+				.with_maxval(1.8 * adccfg.scale) // 1.8 cargo-culted from ADCSensorMain.cpp
 		}).await;
 	}
 	Ok(())

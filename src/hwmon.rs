@@ -357,6 +357,14 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 				},
 			};
 
+			let (minval, maxval) = match file.kind {
+				SensorType::Temperature => (-128.0, 127.0),
+				SensorType::RPM => (0.0, 30000.0),
+				SensorType::Voltage => (0.0, 255.0),
+				SensorType::Current => (0.0, 255.0), // FIXME: PSUSensorMain.cpp has 20 as max for input currents
+				SensorType::Power => (0.0, 3000.0),
+			};
+
 			let io = SensorIO::new(fd).with_i2cdev(i2cdev.clone());
 
 			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
@@ -364,6 +372,8 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 					.with_poll_interval(hwmcfg.poll_interval)
 					.with_power_state(hwmcfg.power_state)
 					.with_thresholds_from(&hwmcfg.thresholds, &sensor_intfs.thresholds, conn)
+					.with_minval(minval)
+					.with_maxval(maxval)
 			}).await;
 		}
 	}

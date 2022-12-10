@@ -126,7 +126,7 @@ pub struct ThresholdBound {
 }
 
 impl ThresholdBound {
-	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
+	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			value: AutoProp::new(f64::NAN, &msgfns.value, dbuspath, conn),
 			hysteresis: f64::NAN,
@@ -163,7 +163,7 @@ impl Threshold {
 pub type Thresholds = HashMap<ThresholdSeverity, Threshold>;
 
 pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &HashMap<ThresholdSeverity, ThresholdIntfData>,
-				   dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Thresholds {
+				   dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Thresholds {
 	let mut thresholds = Thresholds::new();
 	for cfg in cfgs {
 		let intf = threshold_intfs.get(&cfg.severity).expect("missing interface data for threshold severity");

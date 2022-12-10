@@ -85,7 +85,7 @@ pub enum SensorConfig {
 	Hwmon(hwmon::HwmonSensorConfig),
 }
 
-pub type SensorConfigMap = HashMap<Arc<dbus::Path<'static>>, SensorConfig>;
+pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 
 pub struct SensorIO {
 	fd: std::fs::File,
@@ -140,7 +140,7 @@ impl SensorIO {
 
 pub struct Sensor {
 	pub name: String,
-	dbuspath: Arc<dbus::Path<'static>>,
+	dbuspath: Arc<SensorPath>,
 	pub kind: SensorType,
 	poll_interval: Duration,
 	pub power_state: PowerState,
@@ -164,7 +164,7 @@ impl Sensor {
 		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 		let cleanname = name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
-		let dbuspath = Arc::new(dbuspath.into());
+		let dbuspath = Arc::new(SensorPath(dbuspath.into()));
 		let cache = AutoProp::new(f64::NAN, &intfs.value.msgfns.value, &dbuspath, conn);
 
 		Self {
@@ -300,7 +300,7 @@ impl Sensor {
 			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");
 			ifaces.push(intfdata.token);
 		}
-		cr.lock().unwrap().insert((*self.dbuspath).clone(), &ifaces, cbdata.clone());
+		cr.lock().unwrap().insert(self.dbuspath.0.clone(), &ifaces, cbdata.clone());
 	}
 }
 
@@ -433,7 +433,7 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 }
 
 pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
-			filter: &FilterSet<dbus::Path<'static>>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
+			filter: &FilterSet<InventoryPath>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
 			cr: &SyncMutex<dbus_crossroads::Crossroads>, conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
 	let cfg = cfg.lock().await;
 	let mut sensors = sensors.lock().await;

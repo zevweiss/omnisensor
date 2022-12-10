@@ -197,7 +197,7 @@ fn name_for_label(label: &str) -> &str {
 }
 
 pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
-			    dbuspaths: &FilterSet<dbus::Path<'_>>, i2cdevs: &mut I2CDeviceMap,
+			    dbuspaths: &FilterSet<InventoryPath>, i2cdevs: &mut I2CDeviceMap,
 			    cr: &SyncMutex<dbus_crossroads::Crossroads>, sensor_intfs: &SensorIntfData,
 			    conn: &Arc<SyncConnection>) ->ErrResult<()> {
 	let configs = cfg.iter()

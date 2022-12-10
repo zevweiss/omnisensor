@@ -11,12 +11,12 @@ use crate::types::*;
 pub struct AutoProp<A> {
 	data: A,
 	msgfn: Arc<PropChgMsgFn>,
-	dbuspath: Arc<dbus::Path<'static>>,
+	dbuspath: Arc<SensorPath>,
 	conn: Arc<SyncConnection>,
 }
 
 impl<A: Copy + PartialEq + dbus::arg::RefArg> AutoProp<A> {
-	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
+	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			data,
 			msgfn: msgfn.clone(),
@@ -37,12 +37,12 @@ impl<A: Copy + PartialEq + dbus::arg::RefArg> AutoProp<A> {
 	}
 
 	fn send_propchg(&self) {
-		if let Some(msg) = (self.msgfn)(&self.dbuspath, &dbus::arg::Variant(self.data)) {
+		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &dbus::arg::Variant(self.data)) {
 			if self.conn.send(msg).is_err() {
-				eprintln!("Failed to send PropertiesChanged message for {}", self.dbuspath);
+				eprintln!("Failed to send PropertiesChanged message for {}", self.dbuspath.0);
 			}
 		} else {
-			eprintln!("Failed to create PropertiesChanged message for {}", self.dbuspath);
+			eprintln!("Failed to create PropertiesChanged message for {}", self.dbuspath.0);
 		}
 	}
 }

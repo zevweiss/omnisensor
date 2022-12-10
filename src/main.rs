@@ -44,8 +44,8 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	let objs = p.get_managed_objects().await?;
 	let mut result = SensorConfigMap::new();
 
-	'objloop: for (path, submap) in objs.into_iter() {
-		println!("managed object: {}", path);
+	'objloop: for (path, submap) in objs.into_iter().map(|(p, s)| (InventoryPath(p.clone()), s)) {
+		println!("managed object: {}", path.0);
 		for (k, props) in &submap {
 			let parts: Vec<&str> = k.split('.').collect();
 			if parts.len() != 4
@@ -59,7 +59,7 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 			match cfgtype {
 				"ADC" => {
 					let Some(cfg) = adc::ADCSensorConfig::from_dbus(props, k, &submap) else {
-						eprintln!("{}: malformed config data", path);
+						eprintln!("{}: malformed config data", path.0);
 						continue;
 					};
 					println!("\t{:?}", cfg);
@@ -68,7 +68,7 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 				}
 				"LM25066"|"W83773G"|"NCT6779" => {
 					let Some(cfg) = hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) else {
-						eprintln!("{}: malformed config data", path);
+						eprintln!("{}: malformed config data", path.0);
 						continue;
 					};
 					println!("\t{:?}", cfg);
@@ -113,11 +113,12 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 }
 
 async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
-			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>,
+			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<InventoryPath>>>,
 			   cr: &SyncMutex<dbus_crossroads::Crossroads>, msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
 	let Some(path) = msg.path().map(|p| p.into_static()) else {
 		return;
 	};
+	let path = InventoryPath(path);
 
 	{
 		let mut paths = changed_paths.lock().await;
@@ -216,7 +217,7 @@ async fn main() -> ErrResult<()> {
 	let _powersignals = powerstate::register_power_signal_handler(sysbus, powerhandler).await?;
 
 	#[allow(non_upper_case_globals)]
-	static changed_paths: Mutex<Option<HashSet<dbus::Path>>> = Mutex::const_new(None);
+	static changed_paths: Mutex<Option<HashSet<InventoryPath>>> = Mutex::const_new(None);
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
 		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, &cr, msg, sensor_intfs).await;

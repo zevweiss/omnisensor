@@ -40,3 +40,9 @@ impl<T> From<Option<HashSet<T>>> for FilterSet<T> {
 
 pub type PropChgMsgFn = dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg) -> Option<dbus::Message> + Send + Sync;
 pub type SensorIntfToken = dbus_crossroads::IfaceToken<Arc<Mutex<Sensor>>>;
+
+// Use these to ensure the two don't get mixed up.
+#[derive(PartialEq, Eq, Hash)]
+pub struct InventoryPath(pub dbus::Path<'static>);
+#[derive(Clone)]
+pub struct SensorPath(pub dbus::Path<'static>);

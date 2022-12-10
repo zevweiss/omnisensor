@@ -8,6 +8,7 @@ use dbus::{
 	nonblock::SyncConnection,
 };
 use phf::phf_set;
+use tokio::sync::Mutex;
 
 use crate::{
 	types::*,
@@ -19,11 +20,13 @@ use crate::{
 	powerstate::PowerState,
 	sensor,
 	sensor::{
-		DBusSensorMap,
 		Sensor,
 		SensorConfig,
 		SensorConfigMap,
 		SensorIntfData,
+		SensorIO,
+		SensorMap,
+		SensorMapEntry,
 		SensorType,
 	},
 	threshold,
@@ -193,7 +196,7 @@ fn name_for_label(label: &str) -> &str {
 	}
 }
 
-pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
+pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<dbus::Path<'_>>, i2cdevs: &mut I2CDeviceMap,
 			    sensor_intfs: &SensorIntfData, conn: &Arc<SyncConnection>) ->ErrResult<()> {
 	let configs = cfg.iter()
@@ -355,18 +358,26 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut DBusSensorMap,
 				},
 			};
 
-			let thresholds = threshold::get_thresholds_from_configs(&hwmcfg.thresholds,
-										&sensor_intfs.thresholds, dbuspath, conn);
+			let io = SensorIO::new(fd).with_i2cdev(i2cdev.clone());
 
-			let sensor = Sensor::new(&sensorname, file.kind, fd, sensor_intfs, dbuspath, conn)
-				.with_poll_interval(hwmcfg.poll_interval)
-				.with_i2cdev(i2cdev.clone())
-				.with_power_state(hwmcfg.power_state)
-				.with_thresholds(thresholds);
+			match entry {
+				SensorMapEntry::Vacant(e) => {
+					let thresholds = threshold::get_thresholds_from_configs(&hwmcfg.thresholds,
+												&sensor_intfs.thresholds, dbuspath, conn);
 
-			// .expect() because we checked for Occupied(Active(_)) earlier
-			sensor::install_sensor(entry, sensor).await
-				.expect("sensor magically reactivated?");
+					let sensor = Sensor::new(&sensorname, file.kind, sensor_intfs, dbuspath, conn)
+						.with_poll_interval(hwmcfg.poll_interval)
+						.with_power_state(hwmcfg.power_state)
+						.with_thresholds(thresholds);
+					let sensor = Arc::new(Mutex::new(sensor));
+					Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() call below
+					e.insert(sensor);
+				},
+				SensorMapEntry::Occupied(e) => {
+					// FIXME: update sensor config from hwmcfg
+					Sensor::activate(e.get(), io).await;
+				},
+			};
 		}
 	}
 

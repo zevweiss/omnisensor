@@ -4,6 +4,7 @@ use std::{
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
+use tokio::sync::Mutex;
 
 use crate::{
 	types::*,
@@ -11,11 +12,13 @@ use crate::{
 	powerstate::PowerState,
 	sensor,
 	sensor::{
-		DBusSensorMap,
 		Sensor,
 		SensorConfig,
 		SensorConfigMap,
 		SensorIntfData,
+		SensorIO,
+		SensorMap,
+		SensorMapEntry,
 		SensorType,
 	},
 	threshold,
@@ -84,7 +87,7 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 	Ok(paths)
 }
 
-pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMap,
+pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<dbus::Path<'_>>, conn: &Arc<SyncConnection>,
 			    sensor_intfs: &SensorIntfData) -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
@@ -108,11 +111,10 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			continue;
 		}
 
-		let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, adccfg.name.clone()).await else {
+		let Some(mut entry) = sensor::get_nonactive_sensor_entry(sensors, adccfg.name.clone()).await else {
 			continue;
 		};
 
-		let path = &adcpaths[adccfg.index as usize];
 		let bridge_gpio = match &adccfg.bridge_gpio {
 			Some(c) => match BridgeGPIO::from_config(c.clone()) {
 				Ok(c) => Some(c),
@@ -125,6 +127,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			None => None,
 		};
 
+		let path = &adcpaths[adccfg.index as usize];
 		let fd = match std::fs::File::open(path) {
 			Ok(f) => f,
 			Err(e) => {
@@ -134,19 +137,26 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut DBusSensorMa
 			},
 		};
 
-		let thresholds = threshold::get_thresholds_from_configs(&adccfg.thresholds,
-									&sensor_intfs.thresholds, dbuspath, conn);
+		let io = SensorIO::new(fd).with_bridge_gpio(bridge_gpio);
 
-		let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, fd, sensor_intfs, dbuspath, conn)
-			.with_poll_interval(adccfg.poll_interval)
-			.with_scale(adccfg.scale)
-			.with_bridge_gpio(bridge_gpio)
-			.with_power_state(adccfg.power_state)
-			.with_thresholds(thresholds);
-
-		// .expect() because we checked for Occupied(Active(_)) earlier
-		sensor::install_sensor(entry, sensor).await
-			.expect("sensor magically reactivated?");
+		match entry {
+			SensorMapEntry::Vacant(e) => {
+				let thresholds = threshold::get_thresholds_from_configs(&adccfg.thresholds,
+											&sensor_intfs.thresholds, dbuspath, conn);
+				let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, dbuspath, conn)
+					.with_poll_interval(adccfg.poll_interval)
+					.with_scale(adccfg.scale)
+					.with_power_state(adccfg.power_state)
+					.with_thresholds(thresholds);
+				let sensor = Arc::new(Mutex::new(sensor));
+				Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() below
+				e.insert(sensor);
+			},
+			SensorMapEntry::Occupied(ref mut e) => {
+				// FIXME: update sensor config from adccfg
+				Sensor::activate(e.get(), io).await;
+			},
+		};
 	}
 	Ok(())
 }

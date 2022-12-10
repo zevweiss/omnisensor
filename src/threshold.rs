@@ -16,10 +16,7 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 use crate::{
-	sensor::{
-		DBusSensor,
-		DBusSensorState,
-	},
+	sensor::Sensor,
 	types::*,
 	dbus_helpers::AutoProp,
 };
@@ -202,23 +199,16 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &H
 	thresholds
 }
 
-fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, dbs: &Arc<Mutex<DBusSensor>>, sev: ThresholdSeverity, getter: F)
+fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, sensor: &Arc<Mutex<Sensor>>, sev: ThresholdSeverity, getter: F)
 			-> impl futures::Future<Output = std::marker::PhantomData<R>>
 	where F: Fn(&Threshold) -> R, R: dbus::arg::Arg + dbus::arg::RefArg + dbus::arg::Append + 'static
 {
-	let dbs = dbs.clone();
+	let sensor = sensor.clone();
 	async move {
-		let dbs = dbs.lock().await;
-		let mut sendvalue = |sevmap: &Thresholds| {
-			match sevmap.get(&sev) {
-				Some(t) => ctx.reply(Ok(getter(t))),
-				None => ctx.reply(Err(MethodErr::failed("no threshold for interface"))),
-			}
-		};
-
-		match &dbs.state {
-			DBusSensorState::Active(s) => sendvalue(&s.thresholds),
-			DBusSensorState::Phantom(p) => sendvalue(&p.thresholds),
+		let sensor = sensor.lock().await;
+		match sensor.thresholds.get(&sev) {
+			Some(t) => ctx.reply(Ok(getter(t))),
+			None => ctx.reply(Err(MethodErr::failed("no threshold for interface"))),
 		}
 	}
 }
@@ -238,17 +228,17 @@ pub struct ThresholdIntfData {
 	pub msgfns: ThresholdIntfMsgFns,
 }
 
-fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<DBusSensor>>>, sev: ThresholdSeverity, tag: &str, getter: F) -> ThresholdBoundIntfMsgFns
+fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, tag: &str, getter: F) -> ThresholdBoundIntfMsgFns
 	where F: Fn(&Threshold) -> &ThresholdBound + Copy + Send + Sync + 'static
 {
 	let value = b.property(format!("{}{}", sev.to_str(), tag))
-		.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, move |t| getter(t).value.get()))
+		.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| getter(t).value.get()))
 		.emits_changed_true()
 		.changed_msg_fn()
 		.into();
 
 	let alarm = b.property(format!("{}Alarm{}", sev.to_str(), tag))
-		.get_async(move |ctx, dbs| get_prop_value(ctx, dbs, sev, move |t| getter(t).alarm.get()))
+		.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| getter(t).alarm.get()))
 		.emits_changed_true()
 		.changed_msg_fn()
 		.into();
@@ -264,7 +254,7 @@ fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> T
 	let sevstr = sev.to_str();
 	let intfname = format!("xyz.openbmc_project.Sensor.Threshold.{}", sevstr);
 
-	let token = cr.register(intfname, |b: &mut IfaceBuilder<Arc<Mutex<DBusSensor>>>| {
+	let token = cr.register(intfname, |b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>| {
 		propchg_msgfns = Some(ThresholdIntfMsgFns {
 			high: build_threshold_bound_intf(b, sev, "High", |t| &t.high),
 			low: build_threshold_bound_intf(b, sev, "low", |t| &t.low),

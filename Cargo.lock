@@ -40,7 +40,6 @@ dependencies = [
  "glob",
  "gpiocdev",
  "phf",
- "replace_with",
  "strum",
  "strum_macros",
  "tokio",
@@ -619,12 +618,6 @@ checksum = "fb5a58c1855b4b6819d59012155603f0b22ad30cad752600aadfcb695265519a"
 dependencies = [
  "bitflags",
 ]
-
-[[package]]
-name = "replace_with"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
 
 [[package]]
 name = "rustversion"

@@ -29,11 +29,10 @@ mod dbus_helpers;
 
 use types::*;
 use sensor::{
-	DBusSensorMap,
-	DBusSensorState,
 	SensorConfig,
 	SensorConfigMap,
 	SensorIntfData,
+	SensorMap,
 };
 
 const DBUS_NAME: &str = "xyz.openbmc_project.FooSensor";
@@ -113,7 +112,7 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 	Ok(signal)
 }
 
-async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
+async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
 			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>,
 			   msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
 	let Some(path) = msg.path().map(|p| p.into_static()) else {
@@ -203,15 +202,8 @@ async fn main() -> ErrResult<()> {
 
 	let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 
-	for (name, dbs) in sensors.lock().await.iter() {
-		let inner = dbs.lock().await;
-		let s = match inner.state {
-			DBusSensorState::Active(ref s) => s,
-			DBusSensorState::Phantom(_) => {
-				eprintln!("{}: phantom sensor during initialization?", name);
-				continue;
-			},
-		};
+	for sensor in sensors.lock().await.values() {
+		let s = sensor.lock().await;
 		let cleanname = s.name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", s.kind.dbus_category(), cleanname);
 		let mut ifaces = vec![sensor_intfs.value.token];
@@ -219,7 +211,7 @@ async fn main() -> ErrResult<()> {
 			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");
 			ifaces.push(intfdata.token);
 		}
-		cr.insert(dbuspath, &ifaces, dbs.clone());
+		cr.insert(dbuspath, &ifaces, sensor.clone());
 	}
 
 

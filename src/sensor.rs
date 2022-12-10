@@ -5,7 +5,6 @@ use std::{
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
-use replace_with::replace_with_or_abort;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -83,46 +82,29 @@ pub enum SensorConfig {
 
 pub type SensorConfigMap = HashMap<Arc<dbus::Path<'static>>, SensorConfig>;
 
-pub struct Sensor {
-	pub name: String,
-	pub kind: SensorType,
-	cache: AutoProp<f64>,
-
+pub struct SensorIO {
 	fd: std::fs::File,
 	bridge_gpio: Option<BridgeGPIO>,
 	i2cdev: Option<Arc<I2CDevice>>,
-	poll_interval: Duration,
-	power_state: PowerState,
-
-	pub thresholds: Thresholds,
-
-	// This is a combined scale factor set to the product of the
-	// innate hwmon scaling factor (e.g. 1000 to convert a sysfs
-	// millivolt value to volts) and any optional additional
-	// scaling factor specified in the sensor config (e.g. to
-	// translate the raw value of a voltage-divided ADC line back
-	// to its "real" 12V range or the like).
-	scale: f64,
-
-	update_task: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl Sensor {
-	pub fn new(name: &str, kind: SensorType, fd: std::fs::File,
-		   intfs: &SensorIntfData, dbuspath: &Arc<dbus::Path<'static>>,
-		   conn: &Arc<SyncConnection>) -> Self {
+struct SensorIOCtx {
+	io: SensorIO,
+	update_task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for SensorIOCtx {
+	fn drop(&mut self) {
+		self.update_task.abort();
+	}
+}
+
+impl SensorIO {
+	pub fn new(fd: std::fs::File) -> Self {
 		Self {
-			name: name.into(),
-			kind,
 			fd,
-			cache: AutoProp::new(f64::NAN, &intfs.value.msgfns.value, dbuspath, conn),
 			bridge_gpio: None,
 			i2cdev: None,
-			poll_interval: Duration::from_secs(1),
-			power_state: PowerState::Always,
-			thresholds: Thresholds::new(),
-			scale: kind.hwmon_scale(),
-			update_task: None,
 		}
 	}
 
@@ -134,6 +116,57 @@ impl Sensor {
 	pub fn with_i2cdev(mut self, i2cdev: Option<Arc<I2CDevice>>) -> Self {
 		self.i2cdev = i2cdev;
 		self
+	}
+
+	async fn read_raw(&mut self) -> ErrResult<i32> {
+		let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
+			Some(x) => match x.await {
+				Ok(h) => Some(h),
+				Err(e) => {
+					return Err(e);
+				},
+			},
+			None => None,
+		};
+
+		read_from_sysfs::<i32>(&mut self.fd)
+	}
+}
+
+pub struct Sensor {
+	pub name: String,
+	pub kind: SensorType,
+	poll_interval: Duration,
+	pub power_state: PowerState,
+	pub thresholds: Thresholds,
+
+	// This is a combined (multiplicative) scale factor set to the
+	// product of the innate hwmon scaling factor (e.g. 0.001 to
+	// convert a sysfs millivolt value to volts) and any optional
+	// additional scaling factor specified in the sensor config
+	// (e.g. to translate the raw value of a voltage-divided ADC
+	// line back to its "real" 12V range or the like).
+	scale: f64,
+
+	cache: AutoProp<f64>,
+
+	io: Option<SensorIOCtx>,
+}
+
+impl Sensor {
+	pub fn new(name: &str, kind: SensorType, intfs: &SensorIntfData,
+		   dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
+		Self {
+			name: name.into(),
+			kind,
+			cache: AutoProp::new(f64::NAN, &intfs.value.msgfns.value, dbuspath, conn),
+			poll_interval: Duration::from_secs(1),
+			power_state: PowerState::Always,
+			thresholds: Thresholds::new(),
+			scale: kind.hwmon_scale(),
+
+			io: None,
+		}
 	}
 
 	pub fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
@@ -156,10 +189,6 @@ impl Sensor {
 		self
 	}
 
-	async fn active_now(&self) -> bool {
-		self.power_state.active_now().await
-	}
-
 	async fn set_value(&mut self, newval: f64) {
 		self.cache.set(newval);
 
@@ -169,147 +198,89 @@ impl Sensor {
 	}
 
 	async fn update(&mut self) -> ErrResult<()> {
-		let ival = {
-			let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
-				Some(x) => match x.await {
-					Ok(h) => Some(h),
-					Err(e) => {
-						return Err(e);
-					},
-				},
-				None => None,
-			};
-
-			read_from_sysfs::<i32>(&mut self.fd)?
-		};
-
-		self.set_value((ival as f64) * self.scale).await;
-		Ok(())
+		if let Some(ioctx) = &mut self.io {
+			let ival = ioctx.io.read_raw().await?;
+			self.set_value((ival as f64) * self.scale).await;
+			Ok(())
+		} else {
+			Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
+							 "update() called on inactive sensor")))
+		}
 	}
 
-	async fn start_updates(self) -> Arc<Mutex<DBusSensor>> {
-		let mut timer = tokio::time::interval(self.poll_interval);
-		let dbs = Arc::new(Mutex::new(DBusSensor { state: DBusSensorState::Active(self) }));
+	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, io: SensorIO) {
+		let mut s = sensor.lock().await;
 
 		// Use a weak reference in the update task closure so
 		// it doesn't hold a strong reference to the sensor
 		// (which would create a reference loop via
 		// s.update_task and make it un-droppable)
-		let w = Arc::downgrade(&dbs);
+		let weakref = Arc::downgrade(&sensor);
 
 		let update_loop = async move {
 			loop {
-				if let Some(t) = w.upgrade() {
-					let mut dbs = t.lock().await;
+				let Some(sensor) = weakref.upgrade() else {
+					break;
+				};
 
-					if let DBusSensorState::Active(ref mut sensor) = dbs.state {
-						if let Err(e) = sensor.update().await {
-							eprintln!("failed to update {}: {}", sensor.name, e);
-						}
-					} else {
-						eprintln!("update task running on phantom sensor");
+				let mut sensor = sensor.lock().await;
+
+				// Create the sleep here to schedule the timeout
+				// but don't wait for it (so that the interval
+				// includes the time spent doing the update
+				// itself, and hence is the period of the whole
+				// cyclic operation).  FIXME: it does still
+				// include the time spent acquiring the lock,
+				// but I dunno if there's much we can do about
+				// that, realistically...
+				let sleep = tokio::time::sleep(sensor.poll_interval);
+
+				if sensor.io.is_some() {
+					if let Err(e) = sensor.update().await {
+						eprintln!("failed to update {}: {}", sensor.name, e);
 					}
+				} else {
+					eprintln!("BUG: update task running on inactive sensor");
 				}
 
-				// wait after read instead of before so the
-				// first one happens promptly (so we avoid a
-				// long wait before the first sample for sensors
-				// with large poll intervals)
-				timer.tick().await;
+				drop(sensor); // Release the lock while we sleep
+
+				// Now await the sleep.  Do this after the read
+				// instead of before so the first read happens
+				// promptly (so we avoid a long wait before the
+				// first sample for sensors with large poll
+				// intervals)
+				sleep.await;
 			}
 		};
-		{
-			let mut dbs = dbs.lock().await;
-			match dbs.state {
-				DBusSensorState::Active(ref mut s) => {
-					s.update_task = Some(tokio::spawn(update_loop));
-				},
-				_ => {
-					eprintln!("sensor went AWOL while starting update task");
-				},
-			};
-		}
-		dbs
-	}
 
-	fn deactivate(mut self) -> DBusSensorState {
-		DBusSensorState::Phantom(PhantomSensor {
-			kind: self.kind,
-			thresholds: std::mem::take(&mut self.thresholds),
-		})
-	}
-}
-
-impl Drop for Sensor {
-	fn drop(&mut self) {
-		if let Some(tsk) = &self.update_task {
-			tsk.abort();
-		}
-	}
-}
-
-// Data that stays behind after the underlying sensor goes away so we
-// can continue serving it up over dbus
-pub struct PhantomSensor {
-	kind: SensorType,
-	pub thresholds: Thresholds,
-}
-
-impl PhantomSensor {
-	// FIXME: wanted this to consume self, not take by reference, but can't
-	// consume/replace it inside a Mutex/MutexGuard AFAICT...
-	async fn activate(&self, sensor: Sensor) -> Arc<Mutex<DBusSensor>> {
-		if sensor.kind != self.kind {
-			eprintln!("{}: sensor type changed on activation? ({:?} -> {:?})",
-				  sensor.name, self.kind, sensor.kind);
-		}
-		DBusSensor::new(sensor).await
-	}
-}
-
-// A Sensor wrapper that persists for dbus purposes even if the
-// underlying ("real") sensor goes away (e.g. if it's PowerState::On
-// and the host gets shut off).
-pub enum DBusSensorState {
-	Active(Sensor),
-	Phantom(PhantomSensor),
-}
-
-pub struct DBusSensor {
-	pub state: DBusSensorState,
-}
-
-// Maps sensor names to DBusSensors
-pub type DBusSensorMap = HashMap<String, Arc<Mutex<DBusSensor>>>;
-type DBusSensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<DBusSensor>>>;
-
-impl DBusSensor {
-	async fn new(sensor: Sensor) -> Arc<Mutex<Self>> {
-		sensor.start_updates().await
-	}
-
-	fn deactivate(&mut self) {
-		let transfer = |s: DBusSensorState| {
-			match s {
-				DBusSensorState::Active(a) => {
-					a.deactivate()
-				},
-				_ => {
-					eprintln!("tried to deactivate a non-active sensor");
-					s
-				},
-			}
+		let ioctx = SensorIOCtx {
+			io,
+			update_task: tokio::spawn(update_loop),
 		};
-		replace_with_or_abort(&mut self.state, transfer);
-	}
 
-	fn kind(&self) -> SensorType {
-		match &self.state {
-			DBusSensorState::Active(s) => s.kind,
-			DBusSensorState::Phantom(p) => p.kind,
+		if s.io.replace(ioctx).is_some() {
+			eprintln!("BUG: re-activating already-active sensor {}", s.name);
 		}
 	}
+
+	pub async fn deactivate(&mut self) {
+		let oldio = self.io.take();
+		if oldio.is_none() {
+			eprintln!("BUG: deactivate already-inactive sensor {}", self.name);
+		}
+
+		// Could just let this go out of scope, but might as well be
+		// explicit (this is what aborts the update task)
+		drop(oldio);
+
+		self.set_value(f64::NAN).await;
+	}
 }
+
+// Maps sensor names to Sensors
+pub type SensorMap = HashMap<String, Arc<Mutex<Sensor>>>;
+pub type SensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<Sensor>>>;
 
 fn read_from_sysfs<T: std::str::FromStr>(fd: &mut std::fs::File) -> ErrResult<T> {
 	let mut s = String::new();
@@ -351,38 +322,15 @@ pub fn get_single_hwmon_dir(path: &str) -> ErrResult<Option<std::path::PathBuf>>
 	}
 }
 
-pub async fn get_nonactive_sensor_entry(sensors: &mut DBusSensorMap, key: String) -> Option<DBusSensorMapEntry<'_>>
+pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) -> Option<SensorMapEntry<'_>>
 {
 	let entry = sensors.entry(key);
-	if let DBusSensorMapEntry::Occupied(ref e) = entry {
-		if let DBusSensorState::Active(_) = e.get().lock().await.state {
+	if let SensorMapEntry::Occupied(ref e) = entry {
+		if e.get().lock().await.io.is_some() {
 			return None;
 		}
 	}
 	Some(entry)
-}
-
-// Install a sensor into a given hashmap entry, returning None if the entry was
-// already occupied by an active sensor and Some(()) otherwise
-pub async fn install_sensor(mut entry: DBusSensorMapEntry<'_>, sensor: Sensor) -> Option<()>
-{
-	match entry {
-		DBusSensorMapEntry::Vacant(e) => {
-			e.insert(DBusSensor::new(sensor).await);
-		},
-		DBusSensorMapEntry::Occupied(ref mut e) => {
-			let new = {
-				let dbs = e.get().lock().await;
-				match &dbs.state {
-					DBusSensorState::Phantom(p) => p.activate(sensor).await,
-					DBusSensorState::Active(_) =>  return None,
-				}
-			};
-			e.insert(new);
-		},
-	};
-
-	Some(())
 }
 
 pub struct ValueIntfMsgFns {
@@ -398,28 +346,23 @@ pub struct ValueIntfData {
 fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfData {
 	let mut propchg_msgfns = None;
 	let intf = "xyz.openbmc_project.Sensor.Value";
-	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<DBusSensor>>>| {
+	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
 		let unit_chgmsg = b.property("Unit")
-			.get_async(|mut ctx, dbs| {
-				let dbs = dbs.clone();
+			.get_async(|mut ctx, sensor| {
+				let sensor = sensor.clone();
 				async move {
-					let u = dbs.lock().await
-						.kind()
-						.dbus_unit_str();
-					ctx.reply(Ok(u.to_string()))
+					let k = sensor.lock().await.kind;
+					ctx.reply(Ok(k.dbus_unit_str().to_string()))
 				}
 			})
 			.emits_changed_true()
 			.changed_msg_fn();
 
 		let value_chgmsg = b.property("Value")
-			.get_async(|mut ctx, dbs| {
-				let dbs = dbs.clone();
+			.get_async(|mut ctx, sensor| {
+				let sensor = sensor.clone();
 				async move {
-					let x = match &dbs.lock().await.state {
-						DBusSensorState::Active(s) => s.cache.get(),
-						DBusSensorState::Phantom(_) => f64::NAN,
-					};
+					let x = sensor.lock().await.cache.get();
 					ctx.reply(Ok(x))
 				}
 			})
@@ -450,20 +393,20 @@ pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfDat
 	}
 }
 
-pub async fn deactivate(sensors: &mut DBusSensorMap) {
-	for dbs in sensors.values_mut() {
-		let dbs = &mut *dbs.lock().await;
-		let DBusSensorState::Active(ref sensor) = &dbs.state else {
+pub async fn deactivate(sensors: &mut SensorMap) {
+	for sensor in sensors.values_mut() {
+		let sensor = &mut *sensor.lock().await;
+		if sensor.io.is_none() { // FIXME: wrap this check or something?
 			continue;
 		};
-		if sensor.active_now().await {
+		if sensor.power_state.active_now().await {
 			continue;
 		}
-		dbs.deactivate();
+		sensor.deactivate().await;
 	}
 }
 
-pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<DBusSensorMap>,
+pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
 			filter: &FilterSet<dbus::Path<'static>>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
 			conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
 	let cfg = cfg.lock().await;

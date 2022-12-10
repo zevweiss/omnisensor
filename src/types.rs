@@ -5,7 +5,7 @@ use std::{
 	sync::Arc,
 };
 use tokio::sync::Mutex;
-use crate::sensor::DBusSensor;
+use crate::sensor::Sensor;
 
 pub type ErrResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -39,4 +39,4 @@ impl<T> From<Option<HashSet<T>>> for FilterSet<T> {
 }
 
 pub type PropChgMsgFn = dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg) -> Option<dbus::Message> + Send + Sync;
-pub type SensorIntfToken = dbus_crossroads::IfaceToken<Arc<Mutex<DBusSensor>>>;
+pub type SensorIntfToken = dbus_crossroads::IfaceToken<Arc<Mutex<Sensor>>>;

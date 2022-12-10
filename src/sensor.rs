@@ -5,6 +5,7 @@ use std::{
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
+use strum::IntoEnumIterator;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -17,9 +18,9 @@ use crate::{
 	powerstate::PowerState,
 	threshold,
 	threshold::{
-		Thresholds,
+		ThresholdArr,
 		ThresholdConfig,
-		ThresholdIntfData,
+		ThresholdIntfDataArr,
 		ThresholdSeverity,
 	},
 	dbus_helpers::AutoProp,
@@ -144,7 +145,7 @@ pub struct Sensor {
 	pub kind: SensorType,
 	poll_interval: Duration,
 	pub power_state: PowerState,
-	pub thresholds: Thresholds,
+	pub thresholds: ThresholdArr,
 
 	// This is a combined (multiplicative) scale factor set to the
 	// product of the innate hwmon scaling factor (e.g. 0.001 to
@@ -174,7 +175,7 @@ impl Sensor {
 			cache,
 			poll_interval: Duration::from_secs(1),
 			power_state: PowerState::Always,
-			thresholds: Thresholds::new(),
+			thresholds: ThresholdArr::default(),
 			scale: kind.hwmon_scale(),
 
 			io: None,
@@ -192,7 +193,7 @@ impl Sensor {
 	}
 
 	pub fn with_thresholds_from(mut self, cfg: &[ThresholdConfig],
-				    threshold_intfs: &HashMap<ThresholdSeverity, ThresholdIntfData>,
+				    threshold_intfs: &ThresholdIntfDataArr,
 				    conn: &Arc<SyncConnection>) -> Self {
 		self.thresholds = threshold::get_thresholds_from_configs(cfg, threshold_intfs,
 									 &self.dbuspath, conn);
@@ -207,8 +208,10 @@ impl Sensor {
 	async fn set_value(&mut self, newval: f64) {
 		self.cache.set(newval);
 
-		for t in self.thresholds.values_mut() {
-			t.update(newval);
+		for sev in ThresholdSeverity::iter() {
+			if let Some(t) = &mut self.thresholds[sev as usize] {
+				t.update(newval);
+			}
 		}
 	}
 
@@ -296,8 +299,11 @@ impl Sensor {
 			   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
 	{
 		let mut ifaces = vec![sensor_intfs.value.token];
-		for t in self.thresholds.keys() {
-			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");
+		for sev in ThresholdSeverity::iter() {
+			if self.thresholds[sev as usize].is_none() {
+				continue;
+			}
+			let intfdata = &sensor_intfs.thresholds[sev as usize];
 			ifaces.push(intfdata.token);
 		}
 		cr.lock().unwrap().insert(self.dbuspath.0.clone(), &ifaces, cbdata.clone());
@@ -427,7 +433,7 @@ fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfDat
 
 pub struct SensorIntfData {
 	pub value: ValueIntfData,
-	pub thresholds: HashMap<threshold::ThresholdSeverity, threshold::ThresholdIntfData>,
+	pub thresholds: threshold::ThresholdIntfDataArr,
 }
 
 pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfData {

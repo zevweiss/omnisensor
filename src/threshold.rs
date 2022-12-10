@@ -12,8 +12,8 @@ use dbus_crossroads::{
 	IfaceBuilder,
 	MethodErr,
 };
-use strum::IntoEnumIterator;
-use strum_macros::EnumIter;
+use strum::{EnumCount as _EnumCount, IntoEnumIterator};
+use strum_macros::{EnumCount, EnumIter};
 
 use crate::{
 	sensor::Sensor,
@@ -21,13 +21,13 @@ use crate::{
 	dbus_helpers::AutoProp,
 };
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, EnumCount)]
 pub enum ThresholdSeverity {
-	Warning,
-	Critical,
-	PerformanceLoss,
-	SoftShutdown,
-	HardShutdown,
+	Warning = 0,
+	Critical = 1,
+	PerformanceLoss = 2,
+	SoftShutdown = 3,
+	HardShutdown = 4,
 }
 
 impl ThresholdSeverity {
@@ -54,6 +54,8 @@ impl ThresholdSeverity {
 		}
 	}
 }
+
+type ThresholdSeverityArray<T> = [T; ThresholdSeverity::COUNT];
 
 #[derive(Debug, Copy, Clone)]
 pub enum ThresholdBoundType {
@@ -160,14 +162,14 @@ impl Threshold {
 	}
 }
 
-pub type Thresholds = HashMap<ThresholdSeverity, Threshold>;
+pub type ThresholdArr = ThresholdSeverityArray<Option<Threshold>>;
 
-pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &HashMap<ThresholdSeverity, ThresholdIntfData>,
-				   dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Thresholds {
-	let mut thresholds = Thresholds::new();
+pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &ThresholdIntfDataArr,
+				   dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> ThresholdArr {
+	let mut thresholds = ThresholdArr::default();
 	for cfg in cfgs {
-		let intf = threshold_intfs.get(&cfg.severity).expect("missing interface data for threshold severity");
-		let threshold = thresholds.entry(cfg.severity).or_insert(Threshold {
+		let intf = &threshold_intfs[cfg.severity as usize];
+		let threshold = thresholds[cfg.severity as usize].get_or_insert_with(|| Threshold {
 			low: ThresholdBound::new(&intf.msgfns.low, dbuspath, conn),
 			high: ThresholdBound::new(&intf.msgfns.high, dbuspath, conn),
 		});
@@ -206,7 +208,7 @@ fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, sensor: &Arc<Mute
 	let sensor = sensor.clone();
 	async move {
 		let sensor = sensor.lock().await;
-		match sensor.thresholds.get(&sev) {
+		match &sensor.thresholds[sev as usize] {
 			Some(t) => ctx.reply(Ok(getter(t))),
 			None => ctx.reply(Err(MethodErr::failed("no threshold for interface"))),
 		}
@@ -227,6 +229,8 @@ pub struct ThresholdIntfData {
 	pub token: SensorIntfToken,
 	pub msgfns: ThresholdIntfMsgFns,
 }
+
+pub type ThresholdIntfDataArr = ThresholdSeverityArray<ThresholdIntfData>;
 
 fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, tag: &str, getter: F) -> ThresholdBoundIntfMsgFns
 	where F: Fn(&Threshold) -> &ThresholdBound + Copy + Send + Sync + 'static
@@ -267,8 +271,15 @@ fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> T
 	}
 }
 
-pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> HashMap<ThresholdSeverity, ThresholdIntfData> {
-	ThresholdSeverity::iter()
-		.map(|sev| (sev, build_sensor_threshold_intf(cr, sev)))
-		.collect()
+pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> ThresholdIntfDataArr {
+	let res = ThresholdSeverity::iter()
+		.map(|sev| build_sensor_threshold_intf(cr, sev))
+		.collect::<Vec<_>>()
+		.try_into();
+
+	// .unwrap() unfortunately requires Debug, so do it manually...
+	match res {
+		Ok(a) => a,
+		_ => panic!("ThresholdSeverity::iter() produced the wrong number of elements?"),
+	}
 }

@@ -393,35 +393,28 @@ pub struct ValueIntfData {
 	pub msgfns: ValueIntfMsgFns,
 }
 
+fn build_sensor_property<F, R>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>, name: &str, getter: F) -> Box<PropChgMsgFn>
+where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::arg::Arg + dbus::arg::Append + Send + 'static
+{
+	b.property(name)
+		.get_async(move |mut ctx, sensor| {
+			let sensor = sensor.clone();
+			async move {
+				let s = sensor.lock().await;
+				ctx.reply(Ok(getter(&s)))
+			}
+		})
+		.emits_changed_true()
+		.changed_msg_fn()
+}
+
 fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfData {
 	let mut propchg_msgfns = None;
 	let intf = "xyz.openbmc_project.Sensor.Value";
 	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
-		let unit_chgmsg = b.property("Unit")
-			.get_async(|mut ctx, sensor| {
-				let sensor = sensor.clone();
-				async move {
-					let k = sensor.lock().await.kind;
-					ctx.reply(Ok(k.dbus_unit_str().to_string()))
-				}
-			})
-			.emits_changed_true()
-			.changed_msg_fn();
-
-		let value_chgmsg = b.property("Value")
-			.get_async(|mut ctx, sensor| {
-				let sensor = sensor.clone();
-				async move {
-					let x = sensor.lock().await.cache.get();
-					ctx.reply(Ok(x))
-				}
-			})
-			.emits_changed_true()
-			.changed_msg_fn();
-
 		propchg_msgfns = Some(ValueIntfMsgFns {
-			value: value_chgmsg.into(),
-			unit: unit_chgmsg.into(),
+			unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
+			value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
 		});
 	});
 

@@ -141,12 +141,17 @@ impl ThresholdBound {
 			return;
 		}
 
-		// FIXME: factor in hysteresis
-		let newstate = match kind {
-			ThresholdBoundType::Upper => sample >= self.value.get(),
-			ThresholdBoundType::Lower => sample <= self.value.get(),
+		let (test, adjust): (fn(f64, f64) -> bool, _) = match kind {
+			ThresholdBoundType::Upper => (|s, t| s >= t, -self.hysteresis),
+			ThresholdBoundType::Lower => (|s, t| s <= t, self.hysteresis),
 		};
-		self.alarm.set(newstate);
+
+		let mut threshold = self.value.get();
+		if self.alarm.get() {
+			threshold += adjust;
+		}
+
+		self.alarm.set(test(sample, threshold));
 	}
 }
 

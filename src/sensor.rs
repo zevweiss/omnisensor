@@ -1,12 +1,14 @@
 use std::{
 	collections::HashMap,
-	io::{Read, Seek},
 	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
 use strum::IntoEnumIterator;
-use tokio::sync::Mutex;
+use tokio::{
+	io::{AsyncReadExt, AsyncSeekExt},
+	sync::Mutex,
+};
 
 use crate::{
 	types::*,
@@ -89,7 +91,7 @@ pub enum SensorConfig {
 pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 
 pub struct SensorIO {
-	fd: std::fs::File,
+	fd: tokio::fs::File,
 	bridge_gpio: Option<BridgeGPIO>,
 	i2cdev: Option<Arc<I2CDevice>>,
 }
@@ -108,7 +110,7 @@ impl Drop for SensorIOCtx {
 impl SensorIO {
 	pub fn new(fd: std::fs::File) -> Self {
 		Self {
-			fd,
+			fd: fd.into(),
 			bridge_gpio: None,
 			i2cdev: None,
 		}
@@ -135,7 +137,7 @@ impl SensorIO {
 			None => None,
 		};
 
-		read_from_sysfs::<i32>(&mut self.fd)
+		read_from_sysfs::<i32>(&mut self.fd).await
 	}
 }
 
@@ -330,17 +332,12 @@ impl Sensor {
 pub type SensorMap = HashMap<String, Arc<Mutex<Sensor>>>;
 pub type SensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<Sensor>>>;
 
-fn read_from_sysfs<T: std::str::FromStr>(fd: &mut std::fs::File) -> ErrResult<T> {
-	let mut s = String::new();
+async fn read_from_sysfs<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> ErrResult<T> {
+	let mut buf = [0u8; 128];
 
-	// TODO: why does seem to call _llseek twice?  strace:
-	//   [pid 21123] _llseek(23, 0, [0], SEEK_SET) = 0
-	//   [pid 21123] _llseek(23, 0, [0], SEEK_CUR) = 0
-	fd.rewind()?;
-
-	// TODO: find alternative that calls read(2) once instead of
-	// twice?  (this does one for data, plus another for EOF)
-	fd.read_to_string(&mut s)?;
+	fd.rewind().await?;
+	let n = fd.read(&mut buf).await?;
+	let s = std::str::from_utf8(&buf[..n])?;
 
 	// TODO: get .map_err() to work here?
 	match s.trim().parse::<T>() {

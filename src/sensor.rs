@@ -339,12 +339,10 @@ async fn read_from_sysfs<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> ErrR
 	let n = fd.read(&mut buf).await?;
 	let s = std::str::from_utf8(&buf[..n])?;
 
-	// TODO: get .map_err() to work here?
-	match s.trim().parse::<T>() {
-		Ok(n) => Ok(n),
-		Err(_) => Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-							   format!("invalid sysfs data: {}", s)))),
-	}
+	s.trim().parse::<T>()
+		.map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
+							  format!("invalid sysfs data: {}", s)))
+			 as Box<dyn std::error::Error>)
 }
 
 // For cases where we expect exactly one .../hwmon/hwmonX subdirectory of a

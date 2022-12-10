@@ -222,11 +222,6 @@ async fn main() -> ErrResult<()> {
 		cr.insert(dbuspath, &ifaces, dbs.clone());
 	}
 
-	sysbus.start_receive(MatchRule::new_method_call(), Box::new(move |msg, conn| {
-		cr.handle_message(msg, conn).expect("wtf?");
-		true
-	}));
-
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
@@ -247,6 +242,11 @@ async fn main() -> ErrResult<()> {
 	};
 
 	let _propsignals = register_properties_changed_handler(sysbus, prophandler).await?;
+
+	sysbus.start_receive(MatchRule::new_method_call(), Box::new(move |msg, conn| {
+		cr.handle_message(msg, conn).expect("wtf?");
+		true
+	}));
 
 	println!("Hello, world!");
 

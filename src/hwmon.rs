@@ -203,11 +203,11 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 	let configs = cfg.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::Hwmon(hwmcfg) if dbuspaths.contains(path) => Some((path, hwmcfg)),
+				SensorConfig::Hwmon(hwmcfg) if dbuspaths.contains(path) => Some(hwmcfg),
 				_ => None,
 			}
 		});
-	for (dbuspath, hwmcfg) in configs {
+	for hwmcfg in configs {
 		let mainname = &hwmcfg.names[0];
 
 		if !hwmcfg.power_state.active_now().await {
@@ -363,13 +363,10 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 
 			match entry {
 				SensorMapEntry::Vacant(e) => {
-					let thresholds = threshold::get_thresholds_from_configs(&hwmcfg.thresholds,
-												&sensor_intfs.thresholds, dbuspath, conn);
-
-					let sensor = Sensor::new(&sensorname, file.kind, sensor_intfs, dbuspath, conn)
+					let sensor = Sensor::new(&sensorname, file.kind, sensor_intfs, conn)
 						.with_poll_interval(hwmcfg.poll_interval)
 						.with_power_state(hwmcfg.power_state)
-						.with_thresholds(thresholds);
+						.with_thresholds_from(&hwmcfg.thresholds, &sensor_intfs.thresholds, conn);
 					let sensor = Arc::new(Mutex::new(sensor));
 					Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() call below
 					sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);

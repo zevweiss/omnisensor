@@ -94,11 +94,11 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::ADC(adccfg) if dbuspaths.contains(path) => Some((path, adccfg)),
+				SensorConfig::ADC(adccfg) if dbuspaths.contains(path) => Some(adccfg),
 				_ => None,
 			}
 		});
-	for (dbuspath, adccfg) in configs {
+	for adccfg in configs {
 		if adccfg.index >= adcpaths.len() as u64 {
 			eprintln!("{} ignored, no corresponding file found",
 				  adccfg.name);
@@ -141,13 +141,11 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 
 		match entry {
 			SensorMapEntry::Vacant(e) => {
-				let thresholds = threshold::get_thresholds_from_configs(&adccfg.thresholds,
-											&sensor_intfs.thresholds, dbuspath, conn);
-				let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, dbuspath, conn)
+				let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, conn)
 					.with_poll_interval(adccfg.poll_interval)
 					.with_scale(adccfg.scale)
 					.with_power_state(adccfg.power_state)
-					.with_thresholds(thresholds);
+					.with_thresholds_from(&adccfg.thresholds, &sensor_intfs.thresholds, conn);
 				let sensor = Arc::new(Mutex::new(sensor));
 				Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() below
 				sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);

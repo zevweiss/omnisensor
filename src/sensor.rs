@@ -16,7 +16,12 @@ use crate::{
 	gpio::BridgeGPIO,
 	powerstate::PowerState,
 	threshold,
-	threshold::Thresholds,
+	threshold::{
+		Thresholds,
+		ThresholdConfig,
+		ThresholdIntfData,
+		ThresholdSeverity,
+	},
 	dbus_helpers::AutoProp,
 };
 
@@ -155,13 +160,18 @@ pub struct Sensor {
 }
 
 impl Sensor {
-	pub fn new(name: &str, kind: SensorType, intfs: &SensorIntfData,
-		   dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
+	pub fn new(name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>) -> Self {
+		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
+		let cleanname = name.replace(badchar, "_");
+		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
+		let dbuspath = Arc::new(dbuspath.into());
+		let cache = AutoProp::new(f64::NAN, &intfs.value.msgfns.value, &dbuspath, conn);
+
 		Self {
 			name: name.into(),
-			dbuspath: dbuspath.clone(),
+			dbuspath,
 			kind,
-			cache: AutoProp::new(f64::NAN, &intfs.value.msgfns.value, dbuspath, conn),
+			cache,
 			poll_interval: Duration::from_secs(1),
 			power_state: PowerState::Always,
 			thresholds: Thresholds::new(),
@@ -181,8 +191,11 @@ impl Sensor {
 		self
 	}
 
-	pub fn with_thresholds(mut self, thresholds: Thresholds) -> Self {
-		self.thresholds = thresholds;
+	pub fn with_thresholds_from(mut self, cfg: &[ThresholdConfig],
+				    threshold_intfs: &HashMap<ThresholdSeverity, ThresholdIntfData>,
+				    conn: &Arc<SyncConnection>) -> Self {
+		self.thresholds = threshold::get_thresholds_from_configs(cfg, threshold_intfs,
+									 &self.dbuspath, conn);
 		self
 	}
 
@@ -282,9 +295,6 @@ impl Sensor {
 	pub fn add_to_dbus(&self, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 			   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
 	{
-		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
-
-		let cleanname = self.name.replace(badchar, "_");
 		let mut ifaces = vec![sensor_intfs.value.token];
 		for t in self.thresholds.keys() {
 			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");

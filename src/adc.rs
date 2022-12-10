@@ -1,6 +1,6 @@
 use std::{
 	collections::HashMap,
-	sync::Arc,
+	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
@@ -88,8 +88,8 @@ fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
 }
 
 pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
-			    dbuspaths: &FilterSet<dbus::Path<'_>>, conn: &Arc<SyncConnection>,
-			    sensor_intfs: &SensorIntfData) -> ErrResult<()> {
+			    dbuspaths: &FilterSet<dbus::Path<'_>>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
+			    conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
 	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
@@ -150,6 +150,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 					.with_thresholds(thresholds);
 				let sensor = Arc::new(Mutex::new(sensor));
 				Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() below
+				sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);
 				e.insert(sensor);
 			},
 			SensorMapEntry::Occupied(ref mut e) => {

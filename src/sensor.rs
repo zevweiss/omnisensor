@@ -1,7 +1,7 @@
 use std::{
 	collections::HashMap,
 	io::{Read, Seek},
-	sync::Arc,
+	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
@@ -135,6 +135,7 @@ impl SensorIO {
 
 pub struct Sensor {
 	pub name: String,
+	dbuspath: Arc<dbus::Path<'static>>,
 	pub kind: SensorType,
 	poll_interval: Duration,
 	pub power_state: PowerState,
@@ -158,6 +159,7 @@ impl Sensor {
 		   dbuspath: &Arc<dbus::Path<'static>>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			name: name.into(),
+			dbuspath: dbuspath.clone(),
 			kind,
 			cache: AutoProp::new(f64::NAN, &intfs.value.msgfns.value, dbuspath, conn),
 			poll_interval: Duration::from_secs(1),
@@ -275,6 +277,20 @@ impl Sensor {
 		drop(oldio);
 
 		self.set_value(f64::NAN).await;
+	}
+
+	pub fn add_to_dbus(&self, cr: &SyncMutex<dbus_crossroads::Crossroads>,
+			   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
+	{
+		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
+
+		let cleanname = self.name.replace(badchar, "_");
+		let mut ifaces = vec![sensor_intfs.value.token];
+		for t in self.thresholds.keys() {
+			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");
+			ifaces.push(intfdata.token);
+		}
+		cr.lock().unwrap().insert((*self.dbuspath).clone(), &ifaces, cbdata.clone());
 	}
 }
 
@@ -408,16 +424,16 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 
 pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
 			filter: &FilterSet<dbus::Path<'static>>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
-			conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
+			cr: &SyncMutex<dbus_crossroads::Crossroads>, conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
 	let cfg = cfg.lock().await;
 	let mut sensors = sensors.lock().await;
 
-	adc::update_sensors(&cfg, &mut sensors, filter, conn, intfs).await.unwrap_or_else(|e| {
+	adc::update_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
 		eprintln!("Failed to update ADC sensors: {}", e);
 	});
 
 	let mut i2cdevs = i2cdevs.lock().await;
-	hwmon::update_sensors(&cfg, &mut sensors, filter, &mut i2cdevs, intfs, conn).await.unwrap_or_else(|e| {
+	hwmon::update_sensors(&cfg, &mut sensors, filter, &mut i2cdevs, cr, intfs, conn).await.unwrap_or_else(|e| {
 		eprintln!("Failed to update hwmon sensors: {}", e);
 	});
 }

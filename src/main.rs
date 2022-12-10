@@ -1,6 +1,6 @@
 use std::{
 	collections::{HashMap, HashSet},
-	sync::Arc,
+	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
 use dbus_tokio::connection;
@@ -114,7 +114,7 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 
 async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
 			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<dbus::Path<'static>>>>,
-			   msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
+			   cr: &SyncMutex<dbus_crossroads::Crossroads>, msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
 	let Some(path) = msg.path().map(|p| p.into_static()) else {
 		return;
 	};
@@ -157,7 +157,7 @@ async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMa
 		*cfg.lock().await = newcfg;
 	}
 
-	sensor::update_all(cfg, sensors, &filter, i2cdevs, bus, sensor_intfs).await;
+	sensor::update_all(cfg, sensors, &filter, i2cdevs, cr, bus, sensor_intfs).await;
 }
 
 #[tokio::main]
@@ -175,17 +175,18 @@ async fn main() -> ErrResult<()> {
 
 	sysbus.request_name(DBUS_NAME, false, false, false).await?;
 
-	let mut cr = Crossroads::new();
-	cr.set_async_support(Some((sysbus.clone(), Box::new(|x| { tokio::spawn(x); }))));
-	cr.set_object_manager_support(Some(sysbus.clone()));
-
-	let sensor_intfs: &_ = Box::leak(Box::new(sensor::build_sensor_intfs(&mut cr)));
-
-	powerstate::init_host_state(sysbus).await;
-
 	fn globalize<T>(x: T) -> &'static Mutex<T> {
 		Box::leak(Box::new(Mutex::new(x)))
 	}
+
+	let cr: &_ = Box::leak(Box::new(SyncMutex::new(Crossroads::new())));
+	let mut crlock = cr.lock().unwrap();
+	crlock.set_async_support(Some((sysbus.clone(), Box::new(|x| { tokio::spawn(x); }))));
+	crlock.set_object_manager_support(Some(sysbus.clone()));
+
+	let sensor_intfs: &_ = Box::leak(Box::new(sensor::build_sensor_intfs(&mut crlock)));
+
+	powerstate::init_host_state(sysbus).await;
 
 	// HACK: leak things into a pseudo-globals (to satisfy
 	// callback lifetime requirements).  Once const HashMap::new()
@@ -194,30 +195,18 @@ async fn main() -> ErrResult<()> {
 	let i2cdevs = globalize(i2c::I2CDeviceMap::new());
 	let cfg = globalize(get_config(sysbus).await?); // FIXME (error handling)
 
-	sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, sysbus, sensor_intfs).await;
+	crlock.insert("/xyz", &[], ());
+	crlock.insert("/xyz/openbmc_project", &[], ());
+	let objmgr = crlock.object_manager();
+	crlock.insert("/xyz/openbmc_project/sensors", &[objmgr], ());
 
-	cr.insert("/xyz", &[], ());
-	cr.insert("/xyz/openbmc_project", &[], ());
-	cr.insert("/xyz/openbmc_project/sensors", &[cr.object_manager()], ());
+	drop(crlock);
 
-	let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
-
-	for sensor in sensors.lock().await.values() {
-		let s = sensor.lock().await;
-		let cleanname = s.name.replace(badchar, "_");
-		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", s.kind.dbus_category(), cleanname);
-		let mut ifaces = vec![sensor_intfs.value.token];
-		for t in s.thresholds.keys() {
-			let intfdata = sensor_intfs.thresholds.get(t).expect("no interface for threshold severity");
-			ifaces.push(intfdata.token);
-		}
-		cr.insert(dbuspath, &ifaces, sensor.clone());
-	}
-
+	sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
-			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, sysbus, sensor_intfs).await;
+			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
 		} else {
 			let mut sensors = sensors.lock().await;
 			sensor::deactivate(&mut sensors).await;
@@ -230,12 +219,13 @@ async fn main() -> ErrResult<()> {
 	static changed_paths: Mutex<Option<HashSet<dbus::Path>>> = Mutex::const_new(None);
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
-		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, msg, sensor_intfs).await;
+		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, &cr, msg, sensor_intfs).await;
 	};
 
 	let _propsignals = register_properties_changed_handler(sysbus, prophandler).await?;
 
 	sysbus.start_receive(MatchRule::new_method_call(), Box::new(move |msg, conn| {
+		let mut cr = cr.lock().unwrap();
 		cr.handle_message(msg, conn).expect("wtf?");
 		true
 	}));

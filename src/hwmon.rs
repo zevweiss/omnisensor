@@ -1,6 +1,6 @@
 use std::{
 	collections::{HashMap, HashSet},
-	sync::Arc,
+	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
 use dbus::{
@@ -198,7 +198,8 @@ fn name_for_label(label: &str) -> &str {
 
 pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<dbus::Path<'_>>, i2cdevs: &mut I2CDeviceMap,
-			    sensor_intfs: &SensorIntfData, conn: &Arc<SyncConnection>) ->ErrResult<()> {
+			    cr: &SyncMutex<dbus_crossroads::Crossroads>, sensor_intfs: &SensorIntfData,
+			    conn: &Arc<SyncConnection>) ->ErrResult<()> {
 	let configs = cfg.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -371,6 +372,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 						.with_thresholds(thresholds);
 					let sensor = Arc::new(Mutex::new(sensor));
 					Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() call below
+					sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);
 					e.insert(sensor);
 				},
 				SensorMapEntry::Occupied(e) => {

@@ -4,7 +4,6 @@ use std::{
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
-use tokio::sync::Mutex;
 
 use crate::{
 	types::*,
@@ -18,7 +17,6 @@ use crate::{
 		SensorIntfData,
 		SensorIO,
 		SensorMap,
-		SensorMapEntry,
 		SensorType,
 	},
 	threshold,
@@ -111,7 +109,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			continue;
 		}
 
-		let Some(mut entry) = sensor::get_nonactive_sensor_entry(sensors, adccfg.name.clone()).await else {
+		let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, adccfg.name.clone()).await else {
 			continue;
 		};
 
@@ -138,24 +136,13 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 		};
 
 		let io = SensorIO::new(fd).with_bridge_gpio(bridge_gpio);
-
-		match entry {
-			SensorMapEntry::Vacant(e) => {
-				let sensor = Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, conn)
-					.with_poll_interval(adccfg.poll_interval)
-					.with_scale(adccfg.scale)
-					.with_power_state(adccfg.power_state)
-					.with_thresholds_from(&adccfg.thresholds, &sensor_intfs.thresholds, conn);
-				let sensor = Arc::new(Mutex::new(sensor));
-				Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() below
-				sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);
-				e.insert(sensor);
-			},
-			SensorMapEntry::Occupied(ref mut e) => {
-				// FIXME: update sensor config from adccfg
-				Sensor::activate(e.get(), io).await;
-			},
-		};
+		sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
+			Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, conn)
+				.with_poll_interval(adccfg.poll_interval)
+				.with_scale(adccfg.scale)
+				.with_power_state(adccfg.power_state)
+				.with_thresholds_from(&adccfg.thresholds, &sensor_intfs.thresholds, conn)
+		}).await;
 	}
 	Ok(())
 }

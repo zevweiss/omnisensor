@@ -359,6 +359,24 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) ->
 	Some(entry)
 }
 
+pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
+				    io: SensorIO, sensor_intfs: &SensorIntfData, ctor: F)
+	where F: FnOnce() -> Sensor
+{
+	match entry {
+		SensorMapEntry::Vacant(e) => {
+			let sensor = Arc::new(Mutex::new(ctor()));
+			Sensor::activate(&sensor, io).await;
+			sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);
+			e.insert(sensor);
+		},
+		SensorMapEntry::Occupied(e) => {
+			// FIXME: update sensor config from hwmcfg
+			Sensor::activate(e.get(), io).await;
+		},
+	};
+}
+
 pub struct ValueIntfMsgFns {
 	pub unit: Arc<PropChgMsgFn>,
 	pub value: Arc<PropChgMsgFn>,

@@ -8,7 +8,6 @@ use dbus::{
 	nonblock::SyncConnection,
 };
 use phf::phf_set;
-use tokio::sync::Mutex;
 
 use crate::{
 	types::*,
@@ -26,7 +25,6 @@ use crate::{
 		SensorIntfData,
 		SensorIO,
 		SensorMap,
-		SensorMapEntry,
 		SensorType,
 	},
 	threshold,
@@ -361,22 +359,12 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 
 			let io = SensorIO::new(fd).with_i2cdev(i2cdev.clone());
 
-			match entry {
-				SensorMapEntry::Vacant(e) => {
-					let sensor = Sensor::new(&sensorname, file.kind, sensor_intfs, conn)
-						.with_poll_interval(hwmcfg.poll_interval)
-						.with_power_state(hwmcfg.power_state)
-						.with_thresholds_from(&hwmcfg.thresholds, &sensor_intfs.thresholds, conn);
-					let sensor = Arc::new(Mutex::new(sensor));
-					Sensor::activate(&sensor, io).await; // TODO: dedupe with occupied case .activate() call below
-					sensor.lock().await.add_to_dbus(cr, sensor_intfs, &sensor);
-					e.insert(sensor);
-				},
-				SensorMapEntry::Occupied(e) => {
-					// FIXME: update sensor config from hwmcfg
-					Sensor::activate(e.get(), io).await;
-				},
-			};
+			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
+				Sensor::new(&sensorname, file.kind, sensor_intfs, conn)
+					.with_poll_interval(hwmcfg.poll_interval)
+					.with_power_state(hwmcfg.power_state)
+					.with_thresholds_from(&hwmcfg.thresholds, &sensor_intfs.thresholds, conn)
+			}).await;
 		}
 	}
 

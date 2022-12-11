@@ -378,6 +378,84 @@ pub fn get_single_hwmon_dir(path: &str) -> ErrResult<Option<std::path::PathBuf>>
 	}
 }
 
+// Summary info about a hwmon *_input file
+pub struct HwmonFileInfo {
+	pub abspath: std::path::PathBuf,
+
+	// Filename with  "_input" stripped off, e.g. "in1", "temp3", etc.
+	// Allocation here is unfortunate, but AFAIK we can't borrow from
+	// abspath without messing around with Pin and such.
+	pub base: String,
+
+	pub kind: SensorType,
+
+	// Just the numeric part of base, parsed out (mostly just for sorting)
+	pub idx: usize,
+}
+
+// fileprefix could just be a &str (with "" instead of None), but
+// meh...might as well make it slightly more explicit I guess?
+pub fn scan_hwmon_input_files(dir: &std::path::Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {
+	let pattern = dir.join(format!("{}*_input", fileprefix.unwrap_or("")));
+	let mut info: Vec<_> = glob::glob(&pattern.to_string_lossy())?
+		.filter_map(|g| {
+			match g {
+				// wrap this arm in a call to simplify control
+				// flow with early returns
+				Ok(abspath) => (|| {
+					let skip = || {
+						eprintln!("Warning: don't know how to handle {}, skipping",
+							  abspath.display());
+					};
+
+					// .unwrap()s because we know from glob()
+					// above that it'll have a filename, and
+					// that that filename will end in "_input"
+					let base = match abspath.file_name().unwrap().to_str() {
+						Some(s) => s.strip_suffix("_input")
+							.unwrap()
+							.to_string(),
+						_ => {
+							skip();
+							return None;
+						},
+					};
+
+					let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
+					let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
+						skip();
+						return None;
+					};
+
+					// unwrap because we're stripping a prefix
+					// that we know is there
+					let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
+						skip();
+						return None;
+					};
+
+					Some(HwmonFileInfo {
+						kind,
+						idx,
+						base,
+						abspath,
+					})
+				})(),
+
+				Err(e) => {
+					eprintln!("Warning: error scanning {}, skipping entry: {}",
+						  dir.display(), e);
+					None
+				},
+			}
+		})
+		.collect();
+
+	info.sort_by_key(|info| (info.kind, info.idx));
+
+	Ok(info)
+}
+
 pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) -> Option<SensorMapEntry<'_>>
 {
 	let entry = sensors.entry(key);

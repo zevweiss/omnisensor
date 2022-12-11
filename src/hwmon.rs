@@ -238,87 +238,18 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			},
 		};
 
-		let pattern = match hwmcfg.subtype() {
-			HwmonSubType::PSU => "*_input",
-			HwmonSubType::HwmonTemp => "temp*_input",
+		let prefix = match hwmcfg.subtype() {
+			HwmonSubType::PSU => None,
+			HwmonSubType::HwmonTemp => Some("temp"),
 		};
 
-		let inputs = match glob::glob(&hwmondir.join(pattern).to_string_lossy()) {
-			Ok(p) => p,
+		let inputs = match sensor::scan_hwmon_input_files(&hwmondir, prefix) {
+			Ok(v) => v,
 			Err(e) => {
 				eprintln!("{}: error scanning {}, skipping sensor: {}", mainname, hwmondir.display(), e);
 				continue;
 			},
 		};
-
-		// Since we'll need each of them shortly, produce from each matched path:
-		struct HwmonFile {
-			abspath: std::path::PathBuf,
-
-			// Filename with  "_input" stripped off, e.g. "in1", "temp3", etc.
-			// Allocation here is unfortunate, but AFAIK we can't borrow from
-			// abspath without messing around with Pin and such.
-			base: String,
-
-			kind: SensorType,
-
-			// Just the numeric part of base, parsed out (for sorting)
-			idx: usize,
-		}
-
-		let mut inputs: Vec<_> = inputs
-			.filter_map(|g| {
-				match g {
-					// wrap this arm in a call to simplify control
-					// flow with early returns
-					Ok(abspath) => (|| {
-						let skip = || {
-							eprintln!("{}: don't know how to handle {}, skipping",
-								  mainname, abspath.display());
-						};
-
-						// .unwrap()s because we know from glob()
-						// above that it'll have a filename, and
-						// that that filename will end in "_input"
-						let base = match abspath.file_name().unwrap().to_str() {
-							Some(s) => s.strip_suffix("_input")
-								.unwrap()
-								.to_string(),
-							_ => {
-								skip();
-								return None;
-							},
-						};
-
-						let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
-						let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
-							skip();
-							return None;
-						};
-
-						// unwrap because we're stripping a prefix
-						// that we know is there
-						let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
-							skip();
-							return None;
-						};
-
-						Some(HwmonFile{
-							kind,
-							idx,
-							base,
-							abspath,
-						})
-					})(),
-					Err(e) => {
-						eprintln!("{}: error scanning {}, skipping entry: {}",
-							  mainname, hwmondir.display(), e);
-						None
-					},
-				}
-			}).collect();
-
-		inputs.sort_by_key(|f| (f.kind, f.idx));
 
 		for (idx, file) in inputs.iter().enumerate() {
 			// .unwrap() because we know from glob() above that it'll have a

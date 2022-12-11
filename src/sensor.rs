@@ -401,11 +401,6 @@ pub struct ValueIntfMsgFns {
 	pub maxvalue: Arc<PropChgMsgFn>,
 }
 
-pub struct ValueIntfData {
-	pub token: SensorIntfToken,
-	pub msgfns: ValueIntfMsgFns,
-}
-
 fn build_sensor_property<F, R>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>, name: &str, getter: F) -> Box<PropChgMsgFn>
 where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::arg::Arg + dbus::arg::Append + Send + 'static
 {
@@ -421,7 +416,7 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 		.changed_msg_fn()
 }
 
-fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfData {
+fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<ValueIntfMsgFns> {
 	let mut propchg_msgfns = None;
 	let intf = "xyz.openbmc_project.Sensor.Value";
 	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
@@ -433,14 +428,14 @@ fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> ValueIntfDat
 		});
 	});
 
-	ValueIntfData {
+	SensorIntf {
 		token,
 		msgfns: propchg_msgfns.expect("no propchg_msgfns set?"),
 	}
 }
 
 pub struct SensorIntfData {
-	pub value: ValueIntfData,
+	pub value: SensorIntf<ValueIntfMsgFns>,
 	pub thresholds: threshold::ThresholdIntfDataArr,
 }
 

@@ -230,12 +230,7 @@ pub struct ThresholdIntfMsgFns {
 	low: ThresholdBoundIntfMsgFns,
 }
 
-pub struct ThresholdIntfData {
-	pub token: SensorIntfToken,
-	pub msgfns: ThresholdIntfMsgFns,
-}
-
-pub type ThresholdIntfDataArr = ThresholdSeverityArray<ThresholdIntfData>;
+pub type ThresholdIntfDataArr = ThresholdSeverityArray<SensorIntf<ThresholdIntfMsgFns>>;
 
 fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, tag: &str, getter: F) -> ThresholdBoundIntfMsgFns
 	where F: Fn(&Threshold) -> &ThresholdBound + Copy + Send + Sync + 'static
@@ -258,7 +253,7 @@ fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: 
 	}
 }
 
-fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> ThresholdIntfData {
+fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<ThresholdIntfMsgFns> {
 	let mut propchg_msgfns = None;
 	let sevstr = sev.to_str();
 	let intfname = format!("xyz.openbmc_project.Sensor.Threshold.{}", sevstr);
@@ -270,7 +265,7 @@ fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> T
 		});
 	});
 
-	ThresholdIntfData {
+	SensorIntf {
 		token,
 		msgfns: propchg_msgfns.expect("propchg_msgfns not set?"),
 	}

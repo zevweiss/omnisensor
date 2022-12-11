@@ -252,19 +252,13 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 		};
 
 		for (idx, file) in inputs.iter().enumerate() {
-			// .unwrap() because we know from glob() above that it'll have a
-			// final component to strip
-			let labelpath = file.abspath.parent().unwrap().join(format!("{}_label", file.base));
-			let label = if labelpath.is_file() {
-				match std::fs::read_to_string(&labelpath) {
-					Ok(s) => s.trim().to_string(),
-					Err(e) => {
-						eprintln!("{}: error reading {}, skipping entry: {}", mainname, labelpath.display(), e);
-						continue;
-					},
-				}
-			} else {
-				file.base.to_string()
+			let label = match file.get_label() {
+				Ok(s) => s,
+				Err(e) => {
+					eprintln!("{}: error finding label for {}, skipping entry: {}", mainname,
+						  file.abspath.display(), e);
+					continue;
+				},
 			};
 
 			if !hwmcfg.enabled_labels.contains(&label) {

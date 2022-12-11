@@ -393,6 +393,17 @@ pub struct HwmonFileInfo {
 	pub idx: usize,
 }
 
+impl HwmonFileInfo {
+	pub fn get_label(&self) -> ErrResult<String> {
+		let labelpath = self.abspath.with_file_name(format!("{}_label", self.base));
+		if labelpath.is_file() {
+			Ok(std::fs::read_to_string(&labelpath).map(|s| s.trim().to_string())?)
+		} else {
+			Ok(self.base.to_string())
+		}
+	}
+}
+
 // fileprefix could just be a &str (with "" instead of None), but
 // meh...might as well make it slightly more explicit I guess?
 pub fn scan_hwmon_input_files(dir: &std::path::Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {

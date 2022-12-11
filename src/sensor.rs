@@ -407,6 +407,20 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 	};
 }
 
+pub fn build_intf<T, F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> SensorIntf<T>
+	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
+{
+	let mut msgfns: Option<T> = None;
+	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
+		msgfns = Some(mkprops(b))
+	});
+
+	SensorIntf {
+		token,
+		msgfns: msgfns.expect("no msgfns set?"),
+	}
+}
+
 pub struct ValueIntfMsgFns {
 	pub unit: Arc<PropChgMsgFn>,
 	pub value: Arc<PropChgMsgFn>,
@@ -425,26 +439,19 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 				ctx.reply(Ok(getter(&s)))
 			}
 		})
-		.emits_changed_true()
+		.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all AutoProps)
 		.changed_msg_fn()
 }
 
 fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<ValueIntfMsgFns> {
-	let mut propchg_msgfns = None;
-	let intf = "xyz.openbmc_project.Sensor.Value";
-	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
-		propchg_msgfns = Some(ValueIntfMsgFns {
+	build_intf(cr, "xyz.openbmc_project.Sensor.Value", |b| {
+		ValueIntfMsgFns {
 			unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
 			value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
 			minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get()).into(),
 			maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get()).into(),
-		});
-	});
-
-	SensorIntf {
-		token,
-		msgfns: propchg_msgfns.expect("no propchg_msgfns set?"),
-	}
+		}
+	})
 }
 
 pub struct AvailabilityIntfMsgFns {
@@ -452,18 +459,11 @@ pub struct AvailabilityIntfMsgFns {
 }
 
 fn build_availability_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<AvailabilityIntfMsgFns> {
-	let mut msgfns = None;
-	let intf = "xyz.openbmc_project.State.Decorator.Availability";
-	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
-		msgfns = Some(AvailabilityIntfMsgFns {
+	build_intf(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
+		AvailabilityIntfMsgFns {
 			available: build_sensor_property(b, "Available", |s| s.available.get()).into(),
-		})
-	});
-
-	SensorIntf {
-		token,
-		msgfns: msgfns.expect("no availability msgfns set?"),
-	}
+		}
+	})
 }
 
 pub struct OpStatusIntfMsgFns {
@@ -471,18 +471,11 @@ pub struct OpStatusIntfMsgFns {
 }
 
 fn build_opstatus_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<OpStatusIntfMsgFns> {
-	let mut msgfns = None;
-	let intf = "xyz.openbmc_project.State.Decorator.OperationalStatus";
-	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
-		msgfns = Some(OpStatusIntfMsgFns {
+	build_intf(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
+		OpStatusIntfMsgFns {
 			functional: build_sensor_property(b, "Functional", |s| s.functional.get()).into(),
-		})
-	});
-
-	SensorIntf {
-		token,
-		msgfns: msgfns.expect("no opstatus msgfns set?"),
-	}
+		}
+	})
 }
 
 pub struct SensorIntfData {

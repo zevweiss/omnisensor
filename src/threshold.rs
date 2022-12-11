@@ -16,7 +16,7 @@ use strum::{EnumCount as _EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 
 use crate::{
-	sensor::Sensor,
+	sensor::{build_intf, Sensor},
 	types::*,
 	dbus_helpers::AutoProp,
 };
@@ -254,21 +254,12 @@ fn build_threshold_bound_intf<F>(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: 
 }
 
 fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<ThresholdIntfMsgFns> {
-	let mut propchg_msgfns = None;
-	let sevstr = sev.to_str();
-	let intfname = format!("xyz.openbmc_project.Sensor.Threshold.{}", sevstr);
-
-	let token = cr.register(intfname, |b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>| {
-		propchg_msgfns = Some(ThresholdIntfMsgFns {
+	build_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
+		ThresholdIntfMsgFns {
 			high: build_threshold_bound_intf(b, sev, "High", |t| &t.high),
 			low: build_threshold_bound_intf(b, sev, "low", |t| &t.low),
-		});
-	});
-
-	SensorIntf {
-		token,
-		msgfns: propchg_msgfns.expect("propchg_msgfns not set?"),
-	}
+		}
+	})
 }
 
 pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> ThresholdIntfDataArr {

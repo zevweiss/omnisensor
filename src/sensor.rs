@@ -28,6 +28,9 @@ use crate::{
 	dbus_helpers::AutoProp,
 };
 
+#[cfg(feature = "peci")]
+use crate::peci;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SensorType {
 	Temperature,
@@ -86,6 +89,9 @@ impl SensorType {
 pub enum SensorConfig {
 	ADC(adc::ADCSensorConfig),
 	Hwmon(hwmon::HwmonSensorConfig),
+
+	#[cfg(feature = "peci")]
+	PECI(peci::PECISensorConfig),
 }
 
 pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
@@ -609,6 +615,11 @@ pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>
 
 	adc::update_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
 		eprintln!("Failed to update ADC sensors: {}", e);
+	});
+
+	#[cfg(feature = "peci")]
+	peci::update_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
+		eprintln!("Failed to update PECI sensors: {}", e);
 	});
 
 	let mut i2cdevs = i2cdevs.lock().await;

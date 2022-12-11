@@ -21,6 +21,8 @@ mod types;
 mod sensor;
 mod adc;
 mod hwmon;
+#[cfg(feature = "peci")]
+mod peci;
 mod i2c;
 mod gpio;
 mod powerstate;
@@ -75,6 +77,18 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 					result.insert(Arc::new(path), SensorConfig::Hwmon(cfg));
 					continue 'objloop;
 				},
+
+				#[cfg(feature = "peci")]
+				"XeonCPU" => {
+					let Some(cfg) = peci::PECISensorConfig::from_dbus(props, k, &submap) else {
+						eprintln!("{}: malformed config data", path.0);
+						continue;
+					};
+					println!("\t{:?}", cfg);
+					result.insert(Arc::new(path), SensorConfig::PECI(cfg));
+					continue 'objloop;
+				},
+
 				_ => {
 					println!("\t{}:", k);
 					for (p, v) in props {

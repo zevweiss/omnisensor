@@ -3,7 +3,10 @@ use std::{
 	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
-use dbus::nonblock::SyncConnection;
+use dbus::{
+	arg::RefArg,
+	nonblock::SyncConnection,
+};
 
 use crate::{
 	types::*,
@@ -44,7 +47,10 @@ impl ADCSensorConfig {
 		let index: u64 = *prop_cast(basecfg, "Index")?;
 		let poll_sec: u64 = prop_cast(basecfg, "PollRate").copied().unwrap_or(1);
 		let scale: f64 = prop_cast(basecfg, "ScaleFactor").copied().unwrap_or(1.0);
-		let power_state = PowerState::from_dbus(basecfg.get("PowerState"))?;
+		let power_state = match basecfg.get("PowerState") {
+			Some(v) => v.as_str()?.try_into().ok()?,
+			None => PowerState::Always,
+		};
 		let bridge_gpio = intfs.get("xyz.openbmc_project.Configuration.ADC.BridgeGpio0")
 			.and_then(BridgeGPIOConfig::from_dbus).map(Arc::new);
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);

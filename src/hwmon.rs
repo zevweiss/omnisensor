@@ -102,7 +102,10 @@ impl HwmonSensorConfig {
 		let r#type = prop_cast::<String>(basecfg, "Type")?.clone();
 		let poll_sec: u64 = prop_cast(basecfg, "PollRate").copied().unwrap_or(1);
 		let poll_interval = Duration::from_secs(poll_sec);
-		let power_state = PowerState::from_dbus(basecfg.get("PowerState"))?;
+		let power_state = match basecfg.get("PowerState") {
+			Some(v) => v.as_str()?.try_into().ok()?,
+			None => PowerState::Always,
+		};
 		let mut names = vec![name.clone()];
 		for i in 1.. {
 			let key = format!("Name{}", i);

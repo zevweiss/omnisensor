@@ -1,13 +1,12 @@
 use std::ops::DerefMut;
 use dbus::{
-	arg::{Variant, RefArg},
 	message::MatchRule,
 	nonblock,
 	nonblock::stdintf::org_freedesktop_dbus::Properties,
 };
 use tokio::sync::Mutex;
 
-use crate::types::ErrResult;
+use crate::types::*;
 
 #[derive(Debug, Copy, Clone)]
 pub enum PowerState {
@@ -18,23 +17,6 @@ pub enum PowerState {
 }
 
 impl PowerState {
-	// We don't just use prop_cast() here because we want to
-	// distinguish between the key being absent (which gets
-	// defaulted) and it being present but invalid (which gets
-	// rejected).
-	pub fn from_dbus(prop: Option<&Variant<Box<dyn RefArg>>>) -> Option<Self> {
-		let Some(var) = prop else {
-			return Some(Self::Always);
-		};
-		match var.as_str() {
-			Some("Always") => Some(Self::Always),
-			Some("On") => Some(Self::On),
-			Some("BiosPost") => Some(Self::BiosPost),
-			Some("ChassisOn") => Some(Self::ChassisOn),
-			_ => None,
-		}
-	}
-
 	pub async fn active_now(&self) -> bool {
 		let host = HOST_STATE.lock().await;
 		match self {
@@ -42,6 +24,19 @@ impl PowerState {
 			Self::BiosPost => host.power_on && host.post_complete,
 			Self::Always => true,
 			Self::ChassisOn => host.chassis_on,
+		}
+	}
+}
+
+impl TryFrom<&str> for PowerState {
+	type Error = Box<dyn std::error::Error>;
+	fn try_from(s: &str) -> ErrResult<Self> {
+		match s {
+			"Always" => Ok(Self::Always),
+			"On" => Ok(Self::On),
+			"BiosPost" => Ok(Self::BiosPost),
+			"ChassisOn" => Ok(Self::ChassisOn),
+			_ => Err(err_invalid_data("PowerState must be \"Always\", \"On\", \"BiosPost\", or \"ChassisOn\"")),
 		}
 	}
 }

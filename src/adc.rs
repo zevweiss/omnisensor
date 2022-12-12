@@ -15,7 +15,7 @@ use crate::{
 		SensorConfig,
 		SensorConfigMap,
 		SensorIntfData,
-		SensorIO,
+		SensorIOCtx,
 		SensorMap,
 		SensorType,
 	},
@@ -117,7 +117,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			},
 		};
 
-		let io = SensorIO::new(fd).with_bridge_gpio(bridge_gpio);
+		let io = SensorIOCtx::new(fd).with_bridge_gpio(bridge_gpio);
 		sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
 			Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, conn)
 				.with_poll_interval(adccfg.poll_interval)

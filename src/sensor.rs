@@ -98,24 +98,24 @@ pub enum SensorConfig {
 
 pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 
-pub struct SensorIO {
+pub struct SensorIOCtx {
 	fd: tokio::fs::File,
 	bridge_gpio: Option<BridgeGPIO>,
 	i2cdev: Option<Arc<I2CDevice>>,
 }
 
-struct SensorIOCtx {
-	io: SensorIO,
+struct SensorIOTask {
+	ctx: SensorIOCtx,
 	update_task: tokio::task::JoinHandle<()>,
 }
 
-impl Drop for SensorIOCtx {
+impl Drop for SensorIOTask {
 	fn drop(&mut self) {
 		self.update_task.abort();
 	}
 }
 
-impl SensorIO {
+impl SensorIOCtx {
 	pub fn new(fd: std::fs::File) -> Self {
 		Self {
 			fd: fd.into(),
@@ -166,7 +166,7 @@ pub struct Sensor {
 	available: AutoProp<bool>,
 	functional: AutoProp<bool>,
 
-	io: Option<SensorIOCtx>,
+	io: Option<SensorIOTask>,
 }
 
 impl Sensor {
@@ -243,8 +243,8 @@ impl Sensor {
 	}
 
 	async fn update(&mut self) -> ErrResult<()> {
-		if let Some(ioctx) = &mut self.io {
-			let ival = ioctx.io.read_raw().await?;
+		if let Some(io) = &mut self.io {
+			let ival = io.ctx.read_raw().await?;
 			self.set_value((ival as f64) * self.scale).await;
 			Ok(())
 		} else {
@@ -253,7 +253,7 @@ impl Sensor {
 		}
 	}
 
-	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, io: SensorIO) {
+	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, ioctx: SensorIOCtx) {
 		let mut s = sensor.lock().await;
 		let poll_interval = s.poll_interval;
 
@@ -302,12 +302,12 @@ impl Sensor {
 			}
 		};
 
-		let ioctx = SensorIOCtx {
-			io,
+		let io = SensorIOTask {
+			ctx: ioctx,
 			update_task: tokio::spawn(update_loop),
 		};
 
-		if s.io.replace(ioctx).is_some() {
+		if s.io.replace(io).is_some() {
 			eprintln!("BUG: re-activating already-active sensor {}", s.name);
 		}
 
@@ -363,7 +363,7 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) ->
 }
 
 pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-				    io: SensorIO, sensor_intfs: &SensorIntfData, ctor: F)
+				    io: SensorIOCtx, sensor_intfs: &SensorIntfData, ctor: F)
 	where F: FnOnce() -> Sensor
 {
 	match entry {

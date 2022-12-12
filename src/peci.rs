@@ -14,7 +14,7 @@ use crate::{
 		SensorConfig,
 		SensorConfigMap,
 		SensorIntfData,
-		SensorIO,
+		SensorIOCtx,
 		SensorMap,
 	},
 	threshold,
@@ -144,7 +144,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 				},
 			};
 
-			let io = SensorIO::new(fd);
+			let io = SensorIOCtx::new(fd);
 
 			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
 				Sensor::new(&name, file.kind, sensor_intfs, conn)

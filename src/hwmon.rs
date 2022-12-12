@@ -23,7 +23,7 @@ use crate::{
 		SensorConfig,
 		SensorConfigMap,
 		SensorIntfData,
-		SensorIO,
+		SensorIOCtx,
 		SensorMap,
 		SensorType,
 	},
@@ -276,7 +276,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 				SensorType::Power => (0.0, 3000.0),
 			};
 
-			let io = SensorIO::new(fd).with_i2cdev(i2cdev.clone());
+			let io = SensorIOCtx::new(fd).with_i2cdev(i2cdev.clone());
 
 			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
 				Sensor::new(&sensorname, file.kind, sensor_intfs, conn)

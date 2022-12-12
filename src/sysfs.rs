@@ -61,30 +61,32 @@ pub struct HwmonFileInfo {
 
 impl HwmonFileInfo {
 	pub fn from_abspath(abspath: std::path::PathBuf) -> Option<Self> {
-		let skip = || {
-			eprintln!("Warning: don't know how to handle {}, skipping",
-				  abspath.display());
+		let warn_skipped = |msg| {
+			eprintln!("Warning: don't know how to handle {} ({}), skipping",
+				  abspath.display(), msg);
 		};
 
-		let base = match abspath.file_name()?.to_str() {
+		let base = match abspath.file_name().map(|p| p.to_string_lossy()) {
 			Some(s) => s.strip_suffix("_input")?
 				.to_string(),
 			_ => {
-				skip();
+				warn_skipped("no file name?");
 				return None;
 			},
 		};
 
 		let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
 		let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
-			skip();
+			let msg = format!("unrecognized hwmon type tag '{}'", typetag);
+			warn_skipped(&msg);
 			return None;
 		};
 
 		// unwrap because we're stripping a prefix
 		// that we know is there
 		let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
-			skip();
+			let msg = format!("couldn't parse index from '{}'", base);
+			warn_skipped(&msg);
 			return None;
 		};
 

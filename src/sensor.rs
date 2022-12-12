@@ -22,7 +22,7 @@ use crate::{
 		ThresholdIntfDataArr,
 		ThresholdSeverity,
 	},
-	dbus_helpers::AutoProp,
+	dbus_helpers::SignalProp,
 };
 
 #[cfg(feature = "adc")]
@@ -169,11 +169,11 @@ pub struct Sensor {
 	// value to volts) happens elsewhere.
 	scale: f64,
 
-	cache: AutoProp<f64>,
-	minvalue: AutoProp<f64>,
-	maxvalue: AutoProp<f64>,
-	available: AutoProp<bool>,
-	functional: AutoProp<bool>,
+	cache: SignalProp<f64>,
+	minvalue: SignalProp<f64>,
+	maxvalue: SignalProp<f64>,
+	available: SignalProp<bool>,
+	functional: SignalProp<bool>,
 
 	io: Option<SensorIOTask>,
 }
@@ -184,11 +184,11 @@ impl Sensor {
 		let cleanname = name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
 		let dbuspath = Arc::new(SensorPath(dbuspath.into()));
-		let cache = AutoProp::new(f64::NAN, &intfs.value.msgfns.value, &dbuspath, conn);
-		let minvalue = AutoProp::new(f64::NAN, &intfs.value.msgfns.minvalue, &dbuspath, conn);
-		let maxvalue = AutoProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
-		let available = AutoProp::new(false, &intfs.availability.msgfns.available, &dbuspath, conn);
-		let functional = AutoProp::new(true, &intfs.opstatus.msgfns.functional, &dbuspath, conn);
+		let cache = SignalProp::new(f64::NAN, &intfs.value.msgfns.value, &dbuspath, conn);
+		let minvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.minvalue, &dbuspath, conn);
+		let maxvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
+		let available = SignalProp::new(false, &intfs.availability.msgfns.available, &dbuspath, conn);
+		let functional = SignalProp::new(true, &intfs.opstatus.msgfns.functional, &dbuspath, conn);
 
 		Self {
 			name: name.into(),
@@ -421,7 +421,7 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 				ctx.reply(Ok(getter(&s)))
 			}
 		})
-		.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all AutoProps)
+		.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all SignalProps)
 		.changed_msg_fn()
 }
 

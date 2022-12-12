@@ -8,14 +8,14 @@ use crate::types::*;
 
 // A dbus property that owns its own data and automatically sends
 // property-change signals on updates
-pub struct AutoProp<A> {
+pub struct SignalProp<A> {
 	data: A,
 	msgfn: Arc<PropChgMsgFn>,
 	dbuspath: Arc<SensorPath>,
 	conn: Arc<SyncConnection>,
 }
 
-impl<A: Copy + PartialEq + dbus::arg::RefArg> AutoProp<A> {
+impl<A: Copy + PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			data,

@@ -18,7 +18,7 @@ use strum_macros::{EnumCount, EnumIter};
 use crate::{
 	sensor::{build_intf, Sensor},
 	types::*,
-	dbus_helpers::AutoProp,
+	dbus_helpers::SignalProp,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, EnumCount)]
@@ -122,17 +122,17 @@ pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::
 }
 
 pub struct ThresholdBound {
-	value: AutoProp<f64>,
+	value: SignalProp<f64>,
 	hysteresis: f64,
-	alarm: AutoProp<bool>,
+	alarm: SignalProp<bool>,
 }
 
 impl ThresholdBound {
 	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
-			value: AutoProp::new(f64::NAN, &msgfns.value, dbuspath, conn),
+			value: SignalProp::new(f64::NAN, &msgfns.value, dbuspath, conn),
 			hysteresis: f64::NAN,
-			alarm: AutoProp::new(false, &msgfns.alarm, dbuspath, conn),
+			alarm: SignalProp::new(false, &msgfns.alarm, dbuspath, conn),
 		}
 	}
 

@@ -1,5 +1,5 @@
 use std::{sync::Arc, time::Duration};
-use dbus::arg::{Variant, RefArg};
+use dbus::arg::RefArg;
 
 use crate::types::*;
 
@@ -9,15 +9,13 @@ enum Polarity {
 	ActiveLow,
 }
 
-impl Polarity {
-	pub fn from_dbus(prop: Option<&Variant<Box<dyn RefArg>>>) -> Option<Self> {
-		let Some(var) = prop else {
-			return Some(Self::ActiveHigh);
-		};
-		match var.as_str() {
-			Some("High") => Some(Self::ActiveHigh),
-			Some("Low") => Some(Self::ActiveLow),
-			_ => None,
+impl TryFrom<&str> for Polarity {
+	type Error = Box<dyn std::error::Error>;
+	fn try_from(s: &str) -> ErrResult<Self> {
+		match s {
+			"High" => Ok(Self::ActiveHigh),
+			"Low" => Ok(Self::ActiveLow),
+			_ => Err(err_invalid_data("Polarity must be \"High\" or \"Low\"")),
 		}
 	}
 }
@@ -36,7 +34,10 @@ impl BridgeGPIOConfig {
 		use dbus::arg::prop_cast;
 		let name: &String = prop_cast(cfg, "Name")?;
 		let setup_sec: f64 = prop_cast(cfg, "SetupTime").copied().unwrap_or(0.0);
-		let polarity = Polarity::from_dbus(cfg.get("Polarity"))?;
+		let polarity = match cfg.get("Polarity") {
+			Some(v) => v.as_str()?.try_into().ok()?,
+			None => Polarity::ActiveHigh,
+		};
 		Some(Self {
 			name: name.clone(),
 			setup_time: Duration::from_secs_f64(setup_sec),

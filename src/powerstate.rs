@@ -1,10 +1,12 @@
-use std::ops::DerefMut;
+use std::{
+	ops::DerefMut,
+	sync::Mutex as SyncMutex,
+};
 use dbus::{
 	message::MatchRule,
 	nonblock,
 	nonblock::stdintf::org_freedesktop_dbus::Properties,
 };
-use tokio::sync::Mutex;
 
 use crate::types::*;
 
@@ -17,8 +19,8 @@ pub enum PowerState {
 }
 
 impl PowerState {
-	pub async fn active_now(&self) -> bool {
-		let host = HOST_STATE.lock().await;
+	pub fn active_now(&self) -> bool {
+		let host = HOST_STATE.lock().unwrap();
 		match self {
 			Self::On => host.power_on,
 			Self::BiosPost => host.power_on && host.post_complete,
@@ -47,8 +49,7 @@ pub struct HostState {
 	pub post_complete: bool,
 }
 
-// FIXME: std::sync::Mutex::new is const in 1.63...tokio's has const_new() now though.
-static HOST_STATE: Mutex<HostState> = Mutex::const_new(HostState {
+static HOST_STATE: SyncMutex<HostState> = SyncMutex::new(HostState {
 	chassis_on: false,
 	power_on: false,
 	post_complete: false,
@@ -130,7 +131,7 @@ pub async fn init_host_state(bus: &nonblock::SyncConnection) {
 	let power = retrieve(power.await, "host power");
 	let post = retrieve(post.await, "POST");
 
-	let mut state = HOST_STATE.lock().await;
+	let mut state = HOST_STATE.lock().unwrap();
 	let state = state.deref_mut();
 	state.chassis_on = chassis;
 	state.power_on = power;
@@ -163,7 +164,7 @@ pub async fn register_power_signal_handler<F, R>(bus: &nonblock::SyncConnection,
 			};
 
 			{
-				let mut hoststate = HOST_STATE.lock().await;
+				let mut hoststate = HOST_STATE.lock().unwrap();
 				let hoststate = hoststate.deref_mut();
 				(prop.update)(hoststate, newstate);
 			}

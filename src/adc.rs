@@ -88,7 +88,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			continue;
 		};
 
-		if !adccfg.power_state.active_now().await {
+		if !adccfg.power_state.active_now() {
 			// FIXME: log noise
 			eprintln!("{}: not active, skipping...", adccfg.name);
 			continue;

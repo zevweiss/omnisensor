@@ -481,7 +481,7 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 		if sensor.io.is_none() { // FIXME: wrap this check or something?
 			continue;
 		};
-		if sensor.power_state.active_now().await {
+		if sensor.power_state.active_now() {
 			continue;
 		}
 		sensor.deactivate().await;

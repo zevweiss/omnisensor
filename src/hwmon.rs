@@ -209,7 +209,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 	for hwmcfg in configs {
 		let mainname = &hwmcfg.names[0];
 
-		if !hwmcfg.power_state.active_now().await {
+		if !hwmcfg.power_state.active_now() {
 			// FIXME: log noise
 			eprintln!("{}: not active, skipping...", mainname);
 			continue;

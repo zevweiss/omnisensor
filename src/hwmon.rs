@@ -27,6 +27,7 @@ use crate::{
 		SensorMap,
 		SensorType,
 	},
+	sysfs,
 	threshold,
 	threshold::ThresholdConfig
 };
@@ -228,7 +229,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 		};
 
 		let sysfs_dir = hwmcfg.i2c.sysfs_device_dir();
-		let inputs = match sensor::scan_hwmon_input_files(std::path::Path::new(&sysfs_dir), prefix) {
+		let inputs = match sysfs::scan_hwmon_input_files(std::path::Path::new(&sysfs_dir), prefix) {
 			Ok(v) => v,
 			Err(e) => {
 				eprintln!("{}: error scanning {}, skipping sensor: {}", mainname, sysfs_dir, e);

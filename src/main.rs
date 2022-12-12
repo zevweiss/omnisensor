@@ -27,6 +27,7 @@ mod peci;
 mod i2c;
 mod gpio;
 mod powerstate;
+mod sysfs;
 mod threshold;
 mod dbus_helpers;
 

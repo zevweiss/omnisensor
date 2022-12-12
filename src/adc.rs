@@ -19,6 +19,7 @@ use crate::{
 		SensorMap,
 		SensorType,
 	},
+	sysfs,
 	threshold,
 	threshold::ThresholdConfig,
 };
@@ -70,7 +71,7 @@ const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 // Returns a Vec of ... ordered by index (inX_input, E-M config
 // "Index" key)
 fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
-	let devdir = sensor::get_single_hwmon_dir(IIO_HWMON_PATH)?;
+	let devdir = sysfs::get_single_hwmon_dir(IIO_HWMON_PATH)?;
 	let mut paths: Vec<_> = vec![];
 	for i in 1.. {
 		let p = devdir.join(format!("in{}_input", i));

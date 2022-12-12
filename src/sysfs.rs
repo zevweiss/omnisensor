@@ -12,6 +12,11 @@ pub async fn read_and_parse<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> E
 	let n = fd.read(&mut buf).await?;
 	let s = std::str::from_utf8(&buf[..n])?;
 
+	if n == 0 || n >= buf.len() {
+		return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
+							format!("invalid sysfs data: {}", s))))
+	}
+
 	s.trim().parse::<T>()
 		.map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
 							  format!("invalid sysfs data: {}", s)))

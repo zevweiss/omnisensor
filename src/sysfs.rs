@@ -60,6 +60,42 @@ pub struct HwmonFileInfo {
 }
 
 impl HwmonFileInfo {
+	pub fn from_abspath(abspath: std::path::PathBuf) -> Option<Self> {
+		let skip = || {
+			eprintln!("Warning: don't know how to handle {}, skipping",
+				  abspath.display());
+		};
+
+		let base = match abspath.file_name()?.to_str() {
+			Some(s) => s.strip_suffix("_input")?
+				.to_string(),
+			_ => {
+				skip();
+				return None;
+			},
+		};
+
+		let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
+		let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
+			skip();
+			return None;
+		};
+
+		// unwrap because we're stripping a prefix
+		// that we know is there
+		let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
+			skip();
+			return None;
+		};
+
+		Some(HwmonFileInfo {
+			kind,
+			idx,
+			base,
+			abspath,
+		})
+	}
+
 	pub fn get_label(&self) -> ErrResult<String> {
 		let labelpath = self.abspath.with_file_name(format!("{}_label", self.base));
 		if labelpath.is_file() {
@@ -78,48 +114,7 @@ pub fn scan_hwmon_input_files(devdir: &std::path::Path, fileprefix: Option<&str>
 	let mut info: Vec<_> = glob::glob(&pattern.to_string_lossy())?
 		.filter_map(|g| {
 			match g {
-				// wrap this arm in a call to simplify control
-				// flow with early returns
-				Ok(abspath) => (|| {
-					let skip = || {
-						eprintln!("Warning: don't know how to handle {}, skipping",
-							  abspath.display());
-					};
-
-					// .unwrap()s because we know from glob()
-					// above that it'll have a filename, and
-					// that that filename will end in "_input"
-					let base = match abspath.file_name().unwrap().to_str() {
-						Some(s) => s.strip_suffix("_input")
-							.unwrap()
-							.to_string(),
-						_ => {
-							skip();
-							return None;
-						},
-					};
-
-					let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
-					let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
-						skip();
-						return None;
-					};
-
-					// unwrap because we're stripping a prefix
-					// that we know is there
-					let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
-						skip();
-						return None;
-					};
-
-					Some(HwmonFileInfo {
-						kind,
-						idx,
-						base,
-						abspath,
-					})
-				})(),
-
+				Ok(abspath) => HwmonFileInfo::from_abspath(abspath),
 				Err(e) => {
 					eprintln!("Warning: error scanning {}, skipping entry: {}",
 						  hwmondir.display(), e);

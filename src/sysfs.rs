@@ -1,7 +1,7 @@
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::{
-	sensor::SensorType,
+	sensor::{SensorIO, SensorType},
 	types::*,
 };
 
@@ -127,4 +127,24 @@ pub fn scan_hwmon_input_files(devdir: &std::path::Path, fileprefix: Option<&str>
 	info.sort_by_key(|info| (info.kind, info.idx));
 
 	Ok(info)
+}
+
+pub struct SysfsSensorIO {
+	fd: tokio::fs::File,
+	scale: f64,
+}
+
+impl SysfsSensorIO {
+	pub async fn new(file: &HwmonFileInfo) -> ErrResult<SensorIO> {
+		let fd = tokio::fs::File::open(&file.abspath).await?;
+		Ok(SensorIO::Sysfs(SysfsSensorIO {
+			fd,
+			scale: file.kind.hwmon_scale(),
+		}))
+	}
+
+	pub async fn read(&mut self) -> ErrResult<f64> {
+		let ival = read_and_parse::<i32>(&mut self.fd).await?;
+		Ok((ival as f64) * self.scale)
+	}
 }

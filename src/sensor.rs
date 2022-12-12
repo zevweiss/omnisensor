@@ -61,7 +61,7 @@ impl SensorType {
 		}
 	}
 
-	fn hwmon_scale(&self) -> f64 {
+	pub fn hwmon_scale(&self) -> f64 {
 		const UNIT: f64 = 1.0;
 		const MILLI: f64 = 0.001;
 		const MICRO: f64 = 0.000001;
@@ -98,8 +98,20 @@ pub enum SensorConfig {
 
 pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 
+pub enum SensorIO {
+	Sysfs(sysfs::SysfsSensorIO),
+}
+
+impl SensorIO {
+	async fn read(&mut self) -> ErrResult<f64> {
+		match self {
+			Self::Sysfs(x) => x.read(),
+		}.await
+	}
+}
+
 pub struct SensorIOCtx {
-	fd: tokio::fs::File,
+	io: SensorIO,
 	bridge_gpio: Option<BridgeGPIO>,
 	i2cdev: Option<Arc<I2CDevice>>,
 }
@@ -116,9 +128,9 @@ impl Drop for SensorIOTask {
 }
 
 impl SensorIOCtx {
-	pub fn new(fd: std::fs::File) -> Self {
+	pub fn new(io: SensorIO) -> Self {
 		Self {
-			fd: fd.into(),
+			io,
 			bridge_gpio: None,
 			i2cdev: None,
 		}
@@ -134,13 +146,12 @@ impl SensorIOCtx {
 		self
 	}
 
-	async fn read_raw(&mut self) -> ErrResult<i32> {
+	pub async fn read(&mut self) -> ErrResult<f64> {
 		let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
 			Some(x) => Some(x.await?),
 			None => None,
 		};
-
-		sysfs::read_and_parse::<i32>(&mut self.fd).await
+		self.io.read().await
 	}
 }
 
@@ -152,12 +163,10 @@ pub struct Sensor {
 	pub power_state: PowerState,
 	pub thresholds: ThresholdArr,
 
-	// This is a combined (multiplicative) scale factor set to the
-	// product of the innate hwmon scaling factor (e.g. 0.001 to
-	// convert a sysfs millivolt value to volts) and any optional
-	// additional scaling factor specified in the sensor config
-	// (e.g. to translate the raw value of a voltage-divided ADC
-	// line back to its "real" 12V range or the like).
+	// This is only the config-specified scaling factor (converted
+	// to a multiplier); scaling to convert sysfs hwmon values to
+	// the desired units (e.g. 0.001 to convert a sysfs millivolt
+	// value to volts) happens elsewhere.
 	scale: f64,
 
 	cache: AutoProp<f64>,
@@ -191,7 +200,7 @@ impl Sensor {
 			poll_interval: Duration::from_secs(1),
 			power_state: PowerState::Always,
 			thresholds: ThresholdArr::default(),
-			scale: kind.hwmon_scale(),
+			scale: 1.0,
 			available,
 			functional,
 
@@ -218,7 +227,7 @@ impl Sensor {
 	}
 
 	pub fn with_scale(mut self, scale: f64) -> Self {
-		self.scale = scale * self.kind.hwmon_scale();
+		self.scale = scale;
 		self
 	}
 
@@ -244,8 +253,8 @@ impl Sensor {
 
 	async fn update(&mut self) -> ErrResult<()> {
 		if let Some(io) = &mut self.io {
-			let ival = io.ctx.read_raw().await?;
-			self.set_value((ival as f64) * self.scale).await;
+			let val = io.ctx.read().await?;
+			self.set_value(val * self.scale).await;
 			Ok(())
 		} else {
 			Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,

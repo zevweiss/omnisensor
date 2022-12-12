@@ -108,8 +108,8 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			None => None,
 		};
 
-		let fd = match std::fs::File::open(&file.abspath) {
-			Ok(f) => f,
+		let io = match sysfs::SysfsSensorIO::new(&file).await {
+			Ok(io) => io,
 			Err(e) => {
 				eprintln!("Failed to open {} for {}: {}",
 					  file.abspath.display(), adccfg.name, e);
@@ -117,7 +117,7 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			},
 		};
 
-		let io = SensorIOCtx::new(fd).with_bridge_gpio(bridge_gpio);
+		let io = SensorIOCtx::new(io).with_bridge_gpio(bridge_gpio);
 		sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
 			Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, conn)
 				.with_poll_interval(adccfg.poll_interval)

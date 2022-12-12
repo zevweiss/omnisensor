@@ -260,8 +260,8 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 				continue;
 			};
 
-			let fd = match std::fs::File::open(&file.abspath) {
-				Ok(fd) => fd,
+			let io = match sysfs::SysfsSensorIO::new(&file).await {
+				Ok(io) => io,
 				Err(e) => {
 					eprintln!("{}: skipping {}: {}", sensorname, file.abspath.display(), e);
 					continue;
@@ -276,7 +276,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 				SensorType::Power => (0.0, 3000.0),
 			};
 
-			let io = SensorIOCtx::new(fd).with_i2cdev(i2cdev.clone());
+			let io = SensorIOCtx::new(io).with_i2cdev(i2cdev.clone());
 
 			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
 				Sensor::new(&sensorname, file.kind, sensor_intfs, conn)

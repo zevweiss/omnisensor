@@ -39,7 +39,7 @@ use sensor::{
 	SensorMap,
 };
 
-const DBUS_NAME: &str = "xyz.openbmc_project.FooSensor";
+const DBUS_NAME: &str = "xyz.openbmc_project.OmniSensor";
 const ENTITY_MANAGER_NAME: &str = "xyz.openbmc_project.EntityManager";
 
 async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {

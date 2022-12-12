@@ -1,5 +1,5 @@
 [package]
-name = "bmcsensors"
+name = "omnisensor"
 description = "Foolish dbus-sensors reimplementation"
 homepage = "https://gerrit.openbmc.org/c/openbmc/dbus-sensors/+/58783/comments/6e32db08_abb5c2d4"
 license = "Apache-2.0"

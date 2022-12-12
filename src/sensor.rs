@@ -136,12 +136,7 @@ impl SensorIO {
 
 	async fn read_raw(&mut self) -> ErrResult<i32> {
 		let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
-			Some(x) => match x.await {
-				Ok(h) => Some(h),
-				Err(e) => {
-					return Err(e);
-				},
-			},
+			Some(x) => Some(x.await?),
 			None => None,
 		};
 

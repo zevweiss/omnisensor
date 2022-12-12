@@ -31,10 +31,23 @@ pub enum ThresholdSeverity {
 }
 
 impl ThresholdSeverity {
-	// dbus config presents this as a float instead of an int for
-	// some reason...
-	fn from_f64(n: f64) -> ErrResult<Self> {
-		match n as isize {
+	fn to_str(self) -> &'static str {
+		match self {
+			Self::Warning => "Warning",
+			Self::Critical => "Critical",
+			Self::PerformanceLoss => "PerformanceLoss",
+			Self::SoftShutdown => "SoftShutdown",
+			Self::HardShutdown => "HardShutdown",
+		}
+	}
+}
+
+// dbus config presents this as a float instead of an int for
+// some reason...
+impl TryFrom<&f64> for ThresholdSeverity {
+	type Error = Box<dyn std::error::Error>;
+	fn try_from(n: &f64) -> ErrResult<Self> {
+		match *n as isize {
 			0 => Ok(Self::Warning),
 			1 => Ok(Self::Critical),
 			2 => Ok(Self::PerformanceLoss),
@@ -43,16 +56,6 @@ impl ThresholdSeverity {
 			_ => {
 				Err(err_invalid_data("Threshold Severity must be in [0..4]"))
 			},
-		}
-	}
-
-	fn to_str(self) -> &'static str {
-		match self {
-			Self::Warning => "Warning",
-			Self::Critical => "Critical",
-			Self::PerformanceLoss => "PerformanceLoss",
-			Self::SoftShutdown => "SoftShutdown",
-			Self::HardShutdown => "HardShutdown",
 		}
 	}
 }
@@ -89,7 +92,7 @@ pub struct ThresholdConfig {
 impl ThresholdConfig {
 	fn from_dbus(props: &dbus::arg::PropMap) -> ErrResult<Self> {
 		let kind = prop_get_mandatory_from::<str, _>(props, "Direction")?;
-		let severity = ThresholdSeverity::from_f64(*prop_get_mandatory::<f64>(props, "Severity")?)?;
+		let severity = prop_get_mandatory_from::<f64, _>(props, "Severity")?;
 		let value = *prop_get_mandatory::<f64>(props, "Value")?;
 		let hysteresis = *prop_get_default::<f64>(props, "Hysteresis", &f64::NAN)?;
 

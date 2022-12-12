@@ -68,25 +68,10 @@ impl ADCSensorConfig {
 
 const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
-// Returns a Vec of ... ordered by index (inX_input, E-M config
-// "Index" key)
-fn find_adc_sensors() -> ErrResult<Vec<std::path::PathBuf>> {
-	let devdir = sysfs::get_single_hwmon_dir(IIO_HWMON_PATH)?;
-	let mut paths: Vec<_> = vec![];
-	for i in 1.. {
-		let p = devdir.join(format!("in{}_input", i));
-		if !p.is_file() {
-			break;
-		}
-		paths.push(p);
-	}
-	Ok(paths)
-}
-
 pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 			    conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
-	let adcpaths = find_adc_sensors()?; // FIXME (error handling)
+	let hwmondir = sysfs::get_single_hwmon_dir(IIO_HWMON_PATH)?;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -95,11 +80,11 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			}
 		});
 	for adccfg in configs {
-		if adccfg.index >= adcpaths.len() as u64 {
-			eprintln!("{} ignored, no corresponding file found",
-				  adccfg.name);
+		let path = hwmondir.join(format!("in{}_input", adccfg.index + 1));
+		let Some(file) = sysfs::HwmonFileInfo::from_abspath(path) else {
+			eprintln!("{}: No input file found for index {}", adccfg.name, adccfg.index);
 			continue;
-		}
+		};
 
 		if !adccfg.power_state.active_now().await {
 			// FIXME: log noise
@@ -123,12 +108,11 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			None => None,
 		};
 
-		let path = &adcpaths[adccfg.index as usize];
-		let fd = match std::fs::File::open(path) {
+		let fd = match std::fs::File::open(&file.abspath) {
 			Ok(f) => f,
 			Err(e) => {
 				eprintln!("Failed to open {} for {}: {}",
-					  path.display(), adccfg.name, e);
+					  file.abspath.display(), adccfg.name, e);
 				continue;
 			},
 		};

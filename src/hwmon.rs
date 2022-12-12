@@ -226,23 +226,15 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			},
 		};
 
-		let hwmondir = match sensor::get_single_hwmon_dir(&sysfs_dir) {
-			Ok(d) => d,
-			Err(e) => {
-				eprintln!("{}: finding i2c hwmon dir: {}", mainname, e);
-				continue;
-			},
-		};
-
 		let prefix = match hwmcfg.subtype() {
 			HwmonSubType::PSU => None,
 			HwmonSubType::HwmonTemp => Some("temp"),
 		};
 
-		let inputs = match sensor::scan_hwmon_input_files(&hwmondir, prefix) {
+		let inputs = match sensor::scan_hwmon_input_files(std::path::Path::new(&sysfs_dir), prefix) {
 			Ok(v) => v,
 			Err(e) => {
-				eprintln!("{}: error scanning {}, skipping sensor: {}", mainname, hwmondir.display(), e);
+				eprintln!("{}: error scanning {}, skipping sensor: {}", mainname, sysfs_dir, e);
 				continue;
 			},
 		};

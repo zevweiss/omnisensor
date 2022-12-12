@@ -422,8 +422,9 @@ impl HwmonFileInfo {
 
 // fileprefix could just be a &str (with "" instead of None), but
 // meh...might as well make it slightly more explicit I guess?
-pub fn scan_hwmon_input_files(dir: &std::path::Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {
-	let pattern = dir.join(format!("{}*_input", fileprefix.unwrap_or("")));
+pub fn scan_hwmon_input_files(devdir: &std::path::Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {
+	let hwmondir = get_single_hwmon_dir(&devdir.to_string_lossy())?;
+	let pattern = hwmondir.join(format!("{}*_input", fileprefix.unwrap_or("")));
 	let mut info: Vec<_> = glob::glob(&pattern.to_string_lossy())?
 		.filter_map(|g| {
 			match g {
@@ -471,7 +472,7 @@ pub fn scan_hwmon_input_files(dir: &std::path::Path, fileprefix: Option<&str>) -
 
 				Err(e) => {
 					eprintln!("Warning: error scanning {}, skipping entry: {}",
-						  dir.display(), e);
+						  hwmondir.display(), e);
 					None
 				},
 			}

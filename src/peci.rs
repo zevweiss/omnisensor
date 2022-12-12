@@ -106,18 +106,10 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			},
 		};
 
-		let hwmondir = match sensor::get_single_hwmon_dir(&devdir.to_string_lossy()) {
-			Ok(d) => d,
-			Err(e) => {
-				eprintln!("Failed to find hwmon subdirectory in {}: {}", devdir.display(), e);
-				continue;
-			},
-		};
-
-		let inputs = match sensor::scan_hwmon_input_files(&hwmondir, Some("temp")) {
+		let inputs = match sensor::scan_hwmon_input_files(&devdir, Some("temp")) {
 			Ok(v) => v,
 			Err(e) => {
-				eprintln!("Error finding input files in {}: {}", hwmondir.display(), e);
+				eprintln!("Error finding input files in {}: {}", devdir.display(), e);
 				continue;
 			},
 		};

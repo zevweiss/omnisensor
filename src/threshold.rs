@@ -4,7 +4,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use dbus::{
-	arg::prop_cast,
+	arg::{prop_cast, RefArg},
 	nonblock::SyncConnection,
 };
 use dbus_crossroads::{
@@ -63,12 +63,13 @@ pub enum ThresholdBoundType {
 	Lower,
 }
 
-impl ThresholdBoundType {
-	fn from_str(s: &str) -> Option<Self> {
+impl TryFrom<&str> for ThresholdBoundType {
+	type Error = Box<dyn std::error::Error>;
+	fn try_from(s: &str) -> ErrResult<Self> {
 		match s {
-			"less than" => Some(Self::Lower),
-			"greater than" => Some(Self::Upper),
-			_ => None,
+			"less than" => Ok(Self::Lower),
+			"greater than" => Ok(Self::Upper),
+			_ => Err(err_invalid_data("Threshold Direction must be \"less than\" or \"greater than\"")),
 		}
 	}
 }
@@ -86,8 +87,7 @@ pub struct ThresholdConfig {
 impl ThresholdConfig {
 	fn from_dbus(props: &dbus::arg::PropMap) -> Option<Self> {
 		// TODO: issue errors on missing/invalid config keys
-		let kind = prop_cast::<String>(props, "Direction")
-			.and_then(|s| ThresholdBoundType::from_str(s))?;
+		let kind = props.get("Direction")?.as_str()?.try_into().ok()?;
 		let severity = prop_cast::<f64>(props, "Severity")
 			.and_then(|n| ThresholdSeverity::from_f64(*n))?;
 		let value = *prop_cast::<f64>(props, "Value")?;

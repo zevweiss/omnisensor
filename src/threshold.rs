@@ -3,10 +3,7 @@ use std::{
 	sync::Arc,
 };
 use tokio::sync::Mutex;
-use dbus::{
-	arg::{prop_cast, RefArg},
-	nonblock::SyncConnection,
-};
+use dbus::nonblock::SyncConnection;
 use dbus_crossroads::{
 	Crossroads,
 	IfaceBuilder,
@@ -18,7 +15,10 @@ use strum_macros::{EnumCount, EnumIter};
 use crate::{
 	sensor::{build_intf, Sensor},
 	types::*,
-	dbus_helpers::SignalProp,
+	dbus_helpers::{
+		props::*,
+		SignalProp,
+	},
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, EnumCount)]
@@ -33,14 +33,16 @@ pub enum ThresholdSeverity {
 impl ThresholdSeverity {
 	// dbus config presents this as a float instead of an int for
 	// some reason...
-	fn from_f64(n: f64) -> Option<Self> {
+	fn from_f64(n: f64) -> ErrResult<Self> {
 		match n as isize {
-			0 => Some(Self::Warning),
-			1 => Some(Self::Critical),
-			2 => Some(Self::PerformanceLoss),
-			3 => Some(Self::SoftShutdown),
-			4 => Some(Self::HardShutdown),
-			_ => None,
+			0 => Ok(Self::Warning),
+			1 => Ok(Self::Critical),
+			2 => Ok(Self::PerformanceLoss),
+			3 => Ok(Self::SoftShutdown),
+			4 => Ok(Self::HardShutdown),
+			_ => {
+				Err(err_invalid_data("Threshold Severity must be in [0..4]"))
+			},
 		}
 	}
 
@@ -85,20 +87,17 @@ pub struct ThresholdConfig {
 }
 
 impl ThresholdConfig {
-	fn from_dbus(props: &dbus::arg::PropMap) -> Option<Self> {
-		// TODO: issue errors on missing/invalid config keys
-		let kind = props.get("Direction")?.as_str()?.try_into().ok()?;
-		let severity = prop_cast::<f64>(props, "Severity")
-			.and_then(|n| ThresholdSeverity::from_f64(*n))?;
-		let value = *prop_cast::<f64>(props, "Value")?;
-		let hysteresis = *prop_cast::<f64>(props, "Hysteresis")
-			.unwrap_or(&f64::NAN);
+	fn from_dbus(props: &dbus::arg::PropMap) -> ErrResult<Self> {
+		let kind = prop_get_mandatory_from::<str, _>(props, "Direction")?;
+		let severity = ThresholdSeverity::from_f64(*prop_get_mandatory::<f64>(props, "Severity")?)?;
+		let value = *prop_get_mandatory::<f64>(props, "Value")?;
+		let hysteresis = *prop_get_default::<f64>(props, "Hysteresis", &f64::NAN)?;
 
 		if !value.is_finite() {
-			return None;
+			return Err(err_invalid_data("Threshold value must be finite"));
 		}
 
-		Some(Self {
+		Ok(Self {
 			kind,
 			severity,
 			value,
@@ -114,8 +113,11 @@ pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::
 		let Some(props) = intfs.get(&intf) else {
 			break;
 		};
-		if let Some(thr) = ThresholdConfig::from_dbus(props) {
-			thresholds.push(thr);
+		match ThresholdConfig::from_dbus(props) {
+			Ok(thr) => thresholds.push(thr),
+			Err(e) => {
+				eprintln!("Error: invalid threshold config {}: {}", intf, e);
+			},
 		}
 	}
 	thresholds

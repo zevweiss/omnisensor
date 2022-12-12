@@ -3,10 +3,7 @@ use std::{
 	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
-use dbus::{
-	arg::RefArg,
-	nonblock::SyncConnection,
-};
+use dbus::nonblock::SyncConnection;
 
 use crate::{
 	types::*,
@@ -25,6 +22,7 @@ use crate::{
 	sysfs,
 	threshold,
 	threshold::ThresholdConfig,
+	dbus_helpers::props::*,
 };
 
 #[derive(Debug)]
@@ -41,26 +39,24 @@ pub struct ADCSensorConfig {
 }
 
 impl ADCSensorConfig {
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
-		use dbus::arg::prop_cast;
-		let name: &String = prop_cast(basecfg, "Name")?;
-		let index: u64 = *prop_cast(basecfg, "Index")?;
-		let poll_sec: u64 = prop_cast(basecfg, "PollRate").copied().unwrap_or(1);
-		let scale: f64 = prop_cast(basecfg, "ScaleFactor").copied().unwrap_or(1.0);
-		let power_state = match basecfg.get("PowerState") {
-			Some(v) => v.as_str()?.try_into().ok()?,
-			None => PowerState::Always,
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+		let name: &String = prop_get_mandatory(basecfg, "Name")?;
+		let index: u64 = *prop_get_mandatory(basecfg, "Index")?;
+		let poll_sec: u64 = *prop_get_default(basecfg, "PollRate", &1u64)?;
+		let scale: f64 = *prop_get_default(basecfg, "ScaleFactor", &1.0f64)?;
+		let power_state = prop_get_default_from::<str, _>(basecfg, "PowerState", PowerState::Always)?;
+		let bridge_gpio = match intfs.get("xyz.openbmc_project.Configuration.ADC.BridgeGpio0") {
+			Some(map) => Some(Arc::new(BridgeGPIOConfig::from_dbus(map)?)),
+			None => None,
 		};
-		let bridge_gpio = intfs.get("xyz.openbmc_project.Configuration.ADC.BridgeGpio0")
-			.and_then(BridgeGPIOConfig::from_dbus).map(Arc::new);
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 
 		if !scale.is_finite() || scale == 0.0 {
-			eprintln!("{}: ScaleFactor must be finite and non-zero (got {})", name, scale);
-			return None
+			let msg = format!("{}: ScaleFactor must be finite and non-zero (got {})", name, scale);
+			return Err(err_invalid_data(msg));
 		}
 
-		Some(Self {
+		Ok(Self {
 			name: name.clone(),
 			index,
 			poll_interval: Duration::from_secs(poll_sec),

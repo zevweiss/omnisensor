@@ -63,9 +63,12 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 			match cfgtype {
 				#[cfg(feature = "adc")]
 				"ADC" => {
-					let Some(cfg) = adc::ADCSensorConfig::from_dbus(props, k, &submap) else {
-						eprintln!("{}: malformed config data", path.0);
-						continue;
+					let cfg = match adc::ADCSensorConfig::from_dbus(props, k, &submap) {
+						Ok(c) => c,
+						Err(e) => {
+							eprintln!("{}: malformed config data: {}", path.0, e);
+							continue;
+						},
 					};
 					println!("\t{:?}", cfg);
 					result.insert(Arc::new(path), SensorConfig::ADC(cfg));
@@ -73,9 +76,12 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 				}
 
 				"LM25066"|"W83773G"|"NCT6779" => {
-					let Some(cfg) = hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) else {
-						eprintln!("{}: malformed config data", path.0);
-						continue;
+					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) {
+						Ok(c) => c,
+						Err(e) => {
+							eprintln!("{}: malformed config data: {}", path.0, e);
+							continue;
+						},
 					};
 					println!("\t{:?}", cfg);
 					result.insert(Arc::new(path), SensorConfig::Hwmon(cfg));
@@ -84,9 +90,12 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 
 				#[cfg(feature = "peci")]
 				"XeonCPU" => {
-					let Some(cfg) = peci::PECISensorConfig::from_dbus(props, k, &submap) else {
-						eprintln!("{}: malformed config data", path.0);
-						continue;
+					let cfg = match peci::PECISensorConfig::from_dbus(props, k, &submap) {
+						Ok(c) => c,
+						Err(e) => {
+							eprintln!("{}: malformed config data: {}", path.0, e);
+							continue;
+						},
 					};
 					println!("\t{:?}", cfg);
 					result.insert(Arc::new(path), SensorConfig::PECI(cfg));

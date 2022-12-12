@@ -20,6 +20,7 @@ use crate::{
 	threshold,
 	sysfs,
 	types::*,
+	dbus_helpers::props::*,
 };
 
 #[derive(Debug)]
@@ -48,22 +49,21 @@ fn rescan() -> ErrResult<()> {
 }
 
 impl PECISensorConfig {
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
-		use dbus::arg::prop_cast;
-		let name: &String = prop_cast(basecfg, "Name")?;
-		let cpuid: u64 = *prop_cast(basecfg, "CpuID")?;
-		let bus: u64 = *prop_cast(basecfg, "Bus")?;
-		let address: u64 = *prop_cast(basecfg, "Address")?;
-		let dts_crit_offset = prop_cast::<f64>(basecfg, "DtsCritOffset").map(|p| *p).unwrap_or(0.0);
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+		let name: &String = prop_get_mandatory(basecfg, "Name")?;
+		let cpuid: u64 = *prop_get_mandatory(basecfg, "CpuID")?;
+		let bus: u64 = *prop_get_mandatory(basecfg, "Bus")?;
+		let address: u64 = *prop_get_mandatory(basecfg, "Address")?;
+		let dts_crit_offset = *prop_get_default(basecfg, "DtsCritOffset", &0.0f64)?;
 
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 
 		if !dts_crit_offset.is_finite() {
-			eprintln!("{}: DtsCritOffset must be finite (got {})", name, dts_crit_offset);
-			return None;
+			let msg = format!("{}: DtsCritOffset must be finite (got {})", name, dts_crit_offset);
+			return Err(err_invalid_data(msg));
 		}
 
-		Some(Self {
+		Ok(Self {
 			name: name.clone(),
 			cpuid,
 			bus,

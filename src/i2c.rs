@@ -3,10 +3,12 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
-use dbus::arg::{Variant, RefArg};
 use phf::phf_map;
 
-use crate::types::*;
+use crate::{
+	types::*,
+	dbus_helpers::props::*,
+};
 
 // Functionally this could be simplified to a set (perhaps even with
 // membership implying false instead of true to keep it smaller), but
@@ -48,25 +50,14 @@ pub struct I2CDeviceParams {
 const I2C_DEV_DIR: &str = "/sys/bus/i2c/devices";
 
 impl I2CDeviceParams {
-	pub fn from_dbus(cfg: &dbus::arg::PropMap, r#type: &str) -> ErrResult<Option<Self>> {
-		let bus = cfg.get("Bus");
-		let address = cfg.get("Address");
-		let (bus, address) = match (bus, address) {
-			(Some(b), Some(a)) => (b, a),
-			(None, None) => return Ok(None),
-			_ => return Err(err_invalid_data("Bus and Address must both be specified")),
-		};
-		let get_u16 = |v: &Variant<Box<dyn RefArg>>| -> ErrResult<u16> {
-			let Some(x) = v.as_u64() else {
-				return Err(err_invalid_data("Bus and Address must both be u64"));
-			};
-			Ok(x.try_into()?)
-		};
-		Ok(Some(Self {
-			bus: get_u16(bus)?,
-			address: get_u16(address)?,
+	pub fn from_dbus(cfg: &dbus::arg::PropMap, r#type: &str) -> ErrResult<Self> {
+		let bus: u64 = *prop_get_mandatory(cfg, "Bus")?;
+		let address: u64 = *prop_get_mandatory(cfg, "Address")?;
+		Ok(Self {
+			bus: bus.try_into()?,
+			address: address.try_into()?,
 			devtype: r#type.into(),
-		}))
+		})
 	}
 
 	pub fn sysfs_name(&self) -> String {

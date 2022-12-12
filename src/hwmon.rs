@@ -29,7 +29,8 @@ use crate::{
 	},
 	sysfs,
 	threshold,
-	threshold::ThresholdConfig
+	threshold::ThresholdConfig,
+	dbus_helpers::props::*,
 };
 
 #[derive(Debug)]
@@ -95,28 +96,24 @@ enum HwmonSubType {
 }
 
 impl HwmonSensorConfig {
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<Self> {
-		use dbus::arg::prop_cast;
-		let name: &String = prop_cast(basecfg, "Name")?;
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let mut name_overrides: HashMap<String, String> = HashMap::new();
-		let r#type = prop_cast::<String>(basecfg, "Type")?.clone();
-		let poll_sec: u64 = prop_cast(basecfg, "PollRate").copied().unwrap_or(1);
+		let r#type = prop_get_mandatory::<String>(basecfg, "Type")?.clone();
+		let poll_sec: u64 = *prop_get_default(basecfg, "PollRate", &1u64)?;
 		let poll_interval = Duration::from_secs(poll_sec);
-		let power_state = match basecfg.get("PowerState") {
-			Some(v) => v.as_str()?.try_into().ok()?,
-			None => PowerState::Always,
-		};
+		let power_state = prop_get_default_from::<str, _>(basecfg, "PowerState", PowerState::Always)?;
 		let mut names = vec![name.clone()];
 		for i in 1.. {
 			let key = format!("Name{}", i);
-			if let Some(s) = prop_cast::<String>(basecfg, &key) {
+			if let Some(s) = prop_get_optional::<String>(basecfg, &key)? {
 				names.push(s.clone());
 			} else {
 				break;
 			}
 		}
-		let i2c = I2CDeviceParams::from_dbus(basecfg, &r#type).ok()??;
-		let enabled_labels: FilterSet<String> = prop_cast(basecfg, "Labels")
+		let i2c = I2CDeviceParams::from_dbus(basecfg, &r#type)?;
+		let enabled_labels: FilterSet<String> = prop_get_optional(basecfg, "Labels")?
 			.map(|v: &Vec<_>| HashSet::from_iter(v.iter().cloned()))
 			.into();
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
@@ -131,7 +128,7 @@ impl HwmonSensorConfig {
 			}
 		}
 
-		Some(Self {
+		Ok(Self {
 			names,
 			name_overrides,
 			i2c,

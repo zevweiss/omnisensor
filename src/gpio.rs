@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Duration};
-use dbus::arg::RefArg;
 
-use crate::types::*;
+use crate::{
+	dbus_helpers::props::*,
+	types::*,
+};
 
 #[derive(Debug, Copy, Clone)]
 enum Polarity {
@@ -28,17 +30,11 @@ pub struct BridgeGPIOConfig {
 }
 
 impl BridgeGPIOConfig {
-	// FIXME: this (slash its caller(s)) should reject
-	// present-but-invalid config instead of just ignoring it
-	pub fn from_dbus(cfg: &dbus::arg::PropMap) -> Option<Self> {
-		use dbus::arg::prop_cast;
-		let name: &String = prop_cast(cfg, "Name")?;
-		let setup_sec: f64 = prop_cast(cfg, "SetupTime").copied().unwrap_or(0.0);
-		let polarity = match cfg.get("Polarity") {
-			Some(v) => v.as_str()?.try_into().ok()?,
-			None => Polarity::ActiveHigh,
-		};
-		Some(Self {
+	pub fn from_dbus(cfg: &dbus::arg::PropMap) -> ErrResult<Self> {
+		let name: &String = prop_get_mandatory(cfg, "Name")?;
+		let setup_sec: f64 = *prop_get_default(cfg, "SetupTime", &0.0f64)?;
+		let polarity = prop_get_default_from::<str, _>(cfg, "Polarity", Polarity::ActiveHigh)?;
+		Ok(Self {
 			name: name.clone(),
 			setup_time: Duration::from_secs_f64(setup_sec),
 			polarity,

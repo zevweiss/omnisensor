@@ -269,8 +269,8 @@ pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> ThresholdIntfDataArr
 		.try_into();
 
 	// .unwrap() unfortunately requires Debug, so do it manually...
-	match res {
-		Ok(a) => a,
-		_ => panic!("ThresholdSeverity::iter() produced the wrong number of elements?"),
-	}
+	let Ok(arr) = res else {
+		panic!("ThresholdSeverity::iter() produced the wrong number of elements?");
+	};
+	arr
 }

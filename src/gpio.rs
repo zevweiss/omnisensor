@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 use dbus::arg::{Variant, RefArg};
 
-use crate::types::ErrResult;
+use crate::types::*;
 
 #[derive(Debug, Copy, Clone)]
 enum Polarity {
@@ -59,8 +59,7 @@ impl BridgeGPIO {
 	pub fn from_config(cfg: Arc<BridgeGPIOConfig>) -> ErrResult<Self> {
 		let Some(line) = gpiocdev::find_named_line(&cfg.name) else {
 			eprintln!("failed to find bridge GPIO {}", cfg.name);
-			return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
-								"GPIO not found")));
+			return Err(err_not_found("GPIO not found"));
 		};
 
 		// clunk...there's *got* to be a better way of achieving this

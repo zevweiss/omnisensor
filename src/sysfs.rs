@@ -13,14 +13,11 @@ pub async fn read_and_parse<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> E
 	let s = std::str::from_utf8(&buf[..n])?;
 
 	if n == 0 || n >= buf.len() {
-		return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-							format!("invalid sysfs data: {}", s))))
+		return Err(err_invalid_data(format!("invalid sysfs data: {}", s)))
 	}
 
 	s.trim().parse::<T>()
-		.map_err(|_| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-							  format!("invalid sysfs data: {}", s)))
-			 as Box<dyn std::error::Error>)
+		.map_err(|_| err_invalid_data(format!("invalid sysfs data: {}", s)))
 }
 
 // Convenience function for cases where we expect a glob to produce
@@ -30,12 +27,10 @@ pub fn get_single_glob_match(pattern: &str) -> ErrResult<std::path::PathBuf> {
 	let mut matches = glob::glob(&pattern)?;
 	let first = match matches.next() {
 		Some(m) => m?,
-		None => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
-								"no match found"))),
+		None => return Err(err_not_found("no match found")),
 	};
 	if matches.next().is_some() {
-		Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-						 "multiple matches found")))
+		Err(err_invalid_data("multiple matches found"))
 	} else {
 		Ok(first)
 	}

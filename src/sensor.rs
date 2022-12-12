@@ -257,8 +257,7 @@ impl Sensor {
 			self.set_value(val * self.scale).await;
 			Ok(())
 		} else {
-			Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
-							 "update() called on inactive sensor")))
+			Err(err_not_found("update() called on inactive sensor"))
 		}
 	}
 

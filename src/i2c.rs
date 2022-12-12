@@ -6,7 +6,7 @@ use std::{
 use dbus::arg::{Variant, RefArg};
 use phf::phf_map;
 
-use crate::types::ErrResult;
+use crate::types::*;
 
 // Functionally this could be simplified to a set (perhaps even with
 // membership implying false instead of true to keep it smaller), but
@@ -54,13 +54,11 @@ impl I2CDeviceParams {
 		let (bus, address) = match (bus, address) {
 			(Some(b), Some(a)) => (b, a),
 			(None, None) => return Ok(None),
-			_ => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-								     "Bus and Address must both be specified"))),
+			_ => return Err(err_invalid_data("Bus and Address must both be specified")),
 		};
 		let get_u16 = |v: &Variant<Box<dyn RefArg>>| -> ErrResult<u16> {
 			let Some(x) = v.as_u64() else {
-				return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-									"Bus and Address must both be u64")));
+				return Err(err_invalid_data("Bus and Address must both be u64"));
 			};
 			Ok(x.try_into()?)
 		};
@@ -144,8 +142,7 @@ impl I2CDevice {
 		} else {
 			// ...if not the implicit drop of 'dev' will tear down
 			// any partially-instantiated remnants
-			Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other,
-							 "new_device failed to instantiate device")))
+			Err(err_other("new_device failed to instantiate device"))
 		}
 	}
 }

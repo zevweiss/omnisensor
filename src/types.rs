@@ -2,12 +2,39 @@
 
 use std::{
 	collections::HashSet,
+	error::Error,
+	io::ErrorKind,
 	sync::Arc,
 };
 use tokio::sync::Mutex;
 use crate::sensor::Sensor;
 
-pub type ErrResult<T> = Result<T, Box<dyn std::error::Error>>;
+pub type ErrResult<T> = Result<T, Box<dyn Error>>;
+
+// Not strictly types, but convenient helpers to use for ErrResults
+fn mk_err<E>(kind: ErrorKind, err: E) -> Box<dyn Error>
+	where E: Into<Box<dyn Error + Send + Sync>>
+{
+	Box::new(std::io::Error::new(kind, err))
+}
+
+pub fn err_not_found<E>(msg: E) -> Box<dyn Error>
+	where E: Into<Box<dyn Error + Send + Sync>>
+{
+	mk_err(ErrorKind::NotFound, msg)
+}
+
+pub fn err_invalid_data<E>(msg: E) -> Box<dyn Error>
+	where E: Into<Box<dyn Error + Send + Sync>>
+{
+	mk_err(ErrorKind::InvalidData, msg)
+}
+
+pub fn err_other<E>(msg: E) -> Box<dyn Error>
+	where E: Into<Box<dyn Error + Send + Sync>>
+{
+	mk_err(ErrorKind::Other, msg)
+}
 
 // Could just use Option<T> for this with None meaning all, but this is a bit
 // more explicit ("None == All" is sorta counterintuitive, after all...), and

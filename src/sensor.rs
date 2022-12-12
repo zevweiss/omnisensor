@@ -260,6 +260,7 @@ impl Sensor {
 
 	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, io: SensorIO) {
 		let mut s = sensor.lock().await;
+		let poll_interval = s.poll_interval;
 
 		// Use a weak reference in the update task closure so
 		// it doesn't hold a strong reference to the sensor
@@ -268,22 +269,20 @@ impl Sensor {
 		let weakref = Arc::downgrade(&sensor);
 
 		let update_loop = async move {
+			let mut poll_interval = poll_interval;
 			loop {
 				let Some(sensor) = weakref.upgrade() else {
 					break;
 				};
 
-				let mut sensor = sensor.lock().await;
-
 				// Create the sleep here to schedule the timeout
 				// but don't wait for it (so that the interval
-				// includes the time spent doing the update
-				// itself, and hence is the period of the whole
-				// cyclic operation).  FIXME: it does still
-				// include the time spent acquiring the lock,
-				// but I dunno if there's much we can do about
-				// that, realistically...
-				let sleep = tokio::time::sleep(sensor.poll_interval);
+				// includes the time spent acquiring the lock
+				// and doing the update itself, and hence is the
+				// period of the whole cyclic operation).
+				let sleep = tokio::time::sleep(poll_interval);
+
+				let mut sensor = sensor.lock().await;
 
 				if sensor.io.is_some() {
 					if let Err(e) = sensor.update().await {
@@ -292,6 +291,10 @@ impl Sensor {
 				} else {
 					eprintln!("BUG: update task running on inactive sensor");
 				}
+
+				// Read the poll interval for the sleep on the
+				// next iteration of the loop
+				poll_interval = sensor.poll_interval;
 
 				drop(sensor); // Release the lock while we sleep
 

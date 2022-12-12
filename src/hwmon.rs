@@ -214,11 +214,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			continue;
 		}
 
-		let i2cparams = &hwmcfg.i2c;
-
-		let sysfs_dir = i2cparams.sysfs_device_dir();
-
-		let i2cdev = match get_i2cdev(i2cdevs, i2cparams) {
+		let i2cdev = match get_i2cdev(i2cdevs, &hwmcfg.i2c) {
 			Ok(d) => d,
 			Err(e) => {
 				eprintln!("{}: i2c device instantiation failed, skipping: {}", mainname, e);
@@ -231,6 +227,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			HwmonSubType::HwmonTemp => Some("temp"),
 		};
 
+		let sysfs_dir = hwmcfg.i2c.sysfs_device_dir();
 		let inputs = match sensor::scan_hwmon_input_files(std::path::Path::new(&sysfs_dir), prefix) {
 			Ok(v) => v,
 			Err(e) => {

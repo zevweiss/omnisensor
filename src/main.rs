@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 
 mod types;
 mod sensor;
+#[cfg(feature = "adc")]
 mod adc;
 mod hwmon;
 #[cfg(feature = "peci")]
@@ -59,6 +60,7 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 			let cfgtype = parts[3];
 
 			match cfgtype {
+				#[cfg(feature = "adc")]
 				"ADC" => {
 					let Some(cfg) = adc::ADCSensorConfig::from_dbus(props, k, &submap) else {
 						eprintln!("{}: malformed config data", path.0);
@@ -68,6 +70,7 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 					result.insert(Arc::new(path), SensorConfig::ADC(cfg));
 					continue 'objloop;
 				}
+
 				"LM25066"|"W83773G"|"NCT6779" => {
 					let Some(cfg) = hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) else {
 						eprintln!("{}: malformed config data", path.0);

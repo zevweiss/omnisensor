@@ -12,7 +12,6 @@ use tokio::{
 
 use crate::{
 	types::*,
-	adc,
 	hwmon,
 	i2c,
 	i2c::I2CDevice,
@@ -27,6 +26,9 @@ use crate::{
 	},
 	dbus_helpers::AutoProp,
 };
+
+#[cfg(feature = "adc")]
+use crate::adc;
 
 #[cfg(feature = "peci")]
 use crate::peci;
@@ -87,8 +89,10 @@ impl SensorType {
 }
 
 pub enum SensorConfig {
-	ADC(adc::ADCSensorConfig),
 	Hwmon(hwmon::HwmonSensorConfig),
+
+	#[cfg(feature = "adc")]
+	ADC(adc::ADCSensorConfig),
 
 	#[cfg(feature = "peci")]
 	PECI(peci::PECISensorConfig),
@@ -613,6 +617,7 @@ pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>
 	let cfg = cfg.lock().await;
 	let mut sensors = sensors.lock().await;
 
+	#[cfg(feature = "adc")]
 	adc::update_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
 		eprintln!("Failed to update ADC sensors: {}", e);
 	});

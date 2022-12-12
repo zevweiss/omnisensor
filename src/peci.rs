@@ -98,14 +98,20 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 		let devname = format!("{}-{:02x}", pecicfg.bus, pecicfg.address);
 		let sysfs_dir_pat = format!("{}/devices/{}/peci_cpu.cputemp.*.{}", PECI_BUS_DIR,
 					    devname, pecicfg.address);
-		let Ok(Some(devdir)) = sensor::get_single_glob_match(&sysfs_dir_pat) else {
-			eprintln!("Failed to find cputemp subdirectory for PECI device {}", devname);
-			continue;
+		let devdir = match sensor::get_single_glob_match(&sysfs_dir_pat) {
+			Ok(d) => d,
+			Err(e) => {
+				eprintln!("Failed to find cputemp subdirectory for PECI device {}: {}", devname, e);
+				continue;
+			},
 		};
 
-		let Ok(Some(hwmondir)) = sensor::get_single_hwmon_dir(&devdir.to_string_lossy()) else {
-			eprintln!("Failed to find hwmon subdirectory in {}", devdir.display());
-			continue;
+		let hwmondir = match sensor::get_single_hwmon_dir(&devdir.to_string_lossy()) {
+			Ok(d) => d,
+			Err(e) => {
+				eprintln!("Failed to find hwmon subdirectory in {}: {}", devdir.display(), e);
+				continue;
+			},
 		};
 
 		let inputs = match sensor::scan_hwmon_input_files(&hwmondir, Some("temp")) {

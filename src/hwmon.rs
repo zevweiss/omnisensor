@@ -227,11 +227,7 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 		};
 
 		let hwmondir = match sensor::get_single_hwmon_dir(&sysfs_dir) {
-			Ok(Some(d)) => d,
-			Ok(None) => {
-				eprintln!("{}: no i2c hwmon dir, dynamic?", mainname);
-				continue;
-			},
+			Ok(d) => d,
 			Err(e) => {
 				eprintln!("{}: finding i2c hwmon dir: {}", mainname, e);
 				continue;

@@ -369,26 +369,27 @@ async fn read_from_sysfs<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> ErrR
 }
 
 // Convenience function for cases where we expect a glob to produce
-// exactly one match.  Returns Ok(Some(_)) if so, Ok(None) if none are
-// found, and Err(_) on multiple matches (or other errors).
-pub fn get_single_glob_match(pattern: &str) -> ErrResult<Option<std::path::PathBuf>> {
+// exactly one match.  Returns Ok(_) if so, and Err(_) on multiple
+// matches, no matches, or other errors.
+pub fn get_single_glob_match(pattern: &str) -> ErrResult<std::path::PathBuf> {
 	let mut matches = glob::glob(&pattern)?;
 	let first = match matches.next() {
 		Some(m) => m?,
-		None => return Ok(None),
+		None => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound,
+								"no match found"))),
 	};
 	if matches.next().is_some() {
 		Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
-						 "unexpected multiple hwmon directories?")))
+						 "multiple matches found")))
 	} else {
-		Ok(Some(first))
+		Ok(first)
 	}
 }
 
 // For cases where we expect exactly one .../hwmon/hwmonX subdirectory of a
 // given path, this finds the one that's there, ensures there aren't any others,
 // and returns it (including whatever original prefix was passed).
-pub fn get_single_hwmon_dir(path: &str) -> ErrResult<Option<std::path::PathBuf>> {
+pub fn get_single_hwmon_dir(path: &str) -> ErrResult<std::path::PathBuf> {
 	let pattern = format!("{}/hwmon/hwmon[0-9]*", path);
 	get_single_glob_match(&pattern)
 }

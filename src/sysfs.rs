@@ -115,7 +115,7 @@ impl HwmonFileInfo {
 		if labelpath.is_file() {
 			Ok(std::fs::read_to_string(&labelpath).map(|s| s.trim().to_string())?)
 		} else {
-			Ok(self.base.to_string())
+			Ok(self.base.clone())
 		}
 	}
 }

@@ -190,20 +190,20 @@ impl I2CDeviceParams {
 	}
 
 	/// Return the absolute path of the sysfs directory representing the device.
-	pub fn sysfs_device_dir(&self) -> String {
-		format!("{}/{}", I2C_DEV_DIR, self.sysfs_name())
+	pub fn sysfs_device_dir(&self) -> PathBuf {
+		Path::new(I2C_DEV_DIR).join(self.sysfs_name())
 	}
 
 	/// Return the absolute path of the sysfs directory representing the bus via which
 	/// the device is attached.
-	pub fn sysfs_bus_dir(&self) -> String {
-		format!("{}/i2c-{}", I2C_DEV_DIR, self.bus)
+	pub fn sysfs_bus_dir(&self) -> PathBuf {
+		Path::new(I2C_DEV_DIR).join(format!("i2c-{}", self.bus))
 	}
 
 	/// Test if the device is currently present, i.e. has had a driver successfully
 	/// bound to it.
 	pub fn device_present(&self) -> bool {
-		let mut path = PathBuf::from(&self.sysfs_device_dir());
+		let mut path = self.sysfs_device_dir();
 		if self.devtype.creates_hwmon() {
 			path.push("hwmon");
 		}
@@ -216,7 +216,7 @@ impl I2CDeviceParams {
 		if !self.device_present() {
 			false
 		} else {
-			Path::new(&self.sysfs_device_dir()).join("of_node").exists()
+			self.sysfs_device_dir().join("of_node").exists()
 		}
 	}
 
@@ -266,7 +266,7 @@ impl I2CDevice {
 		}
 
 		// Try to create it: 'echo $devtype $addr > .../i2c-$bus/new_device'
-		let ctor_path = Path::new(&dev.params.sysfs_bus_dir()).join("new_device");
+		let ctor_path = dev.params.sysfs_bus_dir().join("new_device");
 		let payload = format!("{} {:#02x}\n", dev.params.devtype.kernel_type(), dev.params.address);
 		eprintln!(">>> Instantiating {} at {}", dev.params.devtype.name(), dev.params.sysfs_name());
 		std::fs::write(&ctor_path, payload)?;
@@ -291,7 +291,7 @@ impl Drop for I2CDevice {
 		// device instantiation that was only partially successful
 		// (i.e. when params.device_present() would return false but
 		// there's still a dummy i2c client device to remove)
-		let dtor_path = Path::new(&self.params.sysfs_bus_dir()).join("delete_device");
+		let dtor_path = self.params.sysfs_bus_dir().join("delete_device");
 		let payload = format!("{:#02x}\n", self.params.address);
 		if let Err(e) = std::fs::write(&dtor_path, payload) {
 			eprintln!("Failed to write to {}: {}", dtor_path.display(), e);

@@ -1,3 +1,8 @@
+//! Backend providing support for PMBus and I2C-based hwmon sensors.
+//!
+//! Combines the functionality of dbus-sensors's `psusensor` and
+//! `hwmontempsensor` daemons.
+
 use std::{
 	collections::{HashMap, HashSet},
 	sync::{Arc, Mutex as SyncMutex},
@@ -33,17 +38,29 @@ use crate::{
 	dbus_helpers::props::*,
 };
 
+/// Internal representation of dbus config data for an I2C/PMBus hwmon sensor.
 #[derive(Debug)]
 pub struct HwmonSensorConfig {
+	/// The sensor names used for the channels of this sensor.
 	names: Vec<String>,
+	/// Alternate names provided by `"<foo>_Name"` config keys.
 	name_overrides: HashMap<String, String>,
+	/// I2C parameters for the sensor.
 	i2c: I2CDeviceParams,
+	/// Polling interval for the sensor.
 	poll_interval: Duration,
+	/// Host power state in which this sensor is active.
 	power_state: PowerState,
+	/// Threshold settings for the sensor.
 	thresholds: Vec<ThresholdConfig>,
+	/// Which channel labels are enabled (i.e. should have a sensor created for them).
 	enabled_labels: FilterSet<String>,
 }
 
+/// A set of device types known to be PMBus sensors.
+///
+/// While broadly similar, PMBus sensors and "basic" hwmon sensors use somewhat different
+/// config schemas; this is used to determine which one we're dealing with.
 static PSU_TYPES: phf::Set<&'static str> = phf_set! {
 	"ADM1266",
 	"ADM1272",
@@ -90,12 +107,16 @@ static PSU_TYPES: phf::Set<&'static str> = phf_set! {
 	"XDPE12284"
 };
 
+/// A small enum used to distinguish PMBus sensors from "basic" hwmon sensors.
+///
+/// (Naming is based on the corresponding dbus-sensors daemons; could perhaps be changed.)
 enum HwmonSubType {
 	PSU,
 	HwmonTemp,
 }
 
 impl HwmonSensorConfig {
+	/// Construct a [`HwmonSensorConfig`] from raw dbus config data.
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let mut name_overrides: HashMap<String, String> = HashMap::new();
@@ -139,6 +160,7 @@ impl HwmonSensorConfig {
 		})
 	}
 
+	/// Return the subtype of the sensor configuration.
 	fn subtype(&self) -> HwmonSubType {
 		if PSU_TYPES.contains(&self.i2c.devtype) {
 			HwmonSubType::PSU
@@ -147,6 +169,7 @@ impl HwmonSensorConfig {
 		}
 	}
 
+	/// Determine the sensor name to use for a given `idx` and `label`.
 	fn sensor_name(&self, idx: usize, label: &str) -> Option<String> {
 		// PSU-style configs and hwmon-style configs use
 		// different naming schemes
@@ -163,6 +186,7 @@ impl HwmonSensorConfig {
 	}
 }
 
+/// Determine the sensor name (component) corresponding to a given hwmon label tag.
 fn name_for_label(label: &str) -> &str {
 	let tag = label.trim_end_matches(|c: char| c.is_ascii_digit());
 	match tag {
@@ -195,6 +219,7 @@ fn name_for_label(label: &str) -> &str {
 	}
 }
 
+/// Instantiate any active PMBus/I2C hwmon sensors configured in `cfgmap`.
 pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<InventoryPath>, i2cdevs: &mut I2CDeviceMap,
 			    cr: &SyncMutex<dbus_crossroads::Crossroads>, sensor_intfs: &SensorIntfData,

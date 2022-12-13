@@ -1,3 +1,7 @@
+//! Backend providing support for ADC sensors.
+//!
+//! A la dbus-sensors's `adcsensor` daemon.
+
 use std::{
 	collections::HashMap,
 	sync::{Arc, Mutex as SyncMutex},
@@ -25,20 +29,32 @@ use crate::{
 	dbus_helpers::props::*,
 };
 
+/// Internal representation of the dbus config data for an ADC sensor (one channel).
 #[derive(Debug)]
 pub struct ADCSensorConfig {
+	/// Sensor name.
 	name: String,
+	/// Index of this sensor (channel) within the ADC hardware device.
 	index: u64,
+	/// Polling interval for the sensor.
 	poll_interval: Duration,
-	// We store this as the reciprocal of what was found in the
-	// config, so that we can multiply instead of dividing
+	/// Scaling multiplier for the sensor.
+	///
+	/// We store this as the reciprocal of what was provided via the dbus config so
+	/// that we can multiply instead of dividing
 	scale: f64,
+	/// Host power state in which this sensor is active.
 	power_state: PowerState,
+	/// Threshold settings for the sensor.
 	thresholds: Vec<ThresholdConfig>,
+	/// An optional GPIO that must be asserted before reading the sensor.
+	///
+	/// Common for battery voltage sensors to reduce parasitic battery drain.
 	bridge_gpio: Option<Arc<BridgeGPIOConfig>>,
 }
 
 impl ADCSensorConfig {
+	/// Construct an [`ADCSensorConfig`] from raw dbus config data.
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let index: u64 = *prop_get_mandatory(basecfg, "Index")?;
@@ -68,8 +84,10 @@ impl ADCSensorConfig {
 	}
 }
 
+/// The directory where we expect to find the ADC sensor device.
 const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
+/// Instantiate any active ADC sensors configured in `cfgmap`.
 pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 			    conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {

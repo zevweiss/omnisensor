@@ -68,6 +68,15 @@ pub enum ThresholdBoundType {
 	Upper = 1,
 }
 
+impl ThresholdBoundType {
+	fn direction_tag(&self) -> &'static str {
+		match self {
+			Self::Lower => "Low",
+			Self::Upper => "High",
+		}
+	}
+}
+
 impl TryFrom<&str> for ThresholdBoundType {
 	type Error = Box<dyn std::error::Error>;
 	fn try_from(s: &str) -> ErrResult<Self> {
@@ -181,12 +190,13 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &T
 	let mut thresholds = ThresholdArr::default();
 	for cfg in cfgs {
 		let intf = &threshold_intfs[cfg.severity as usize];
-		let threshold = thresholds[cfg.severity as usize].get_or_insert_with(|| Threshold {
-			bounds: [
-				ThresholdBound::new(&intf.msgfns.low, dbuspath, conn),
-				ThresholdBound::new(&intf.msgfns.high, dbuspath, conn),
-			],
-		});
+		let Ok(bounds) = ThresholdBoundType::iter()
+			.map(|t| ThresholdBound::new(&intf.msgfns.bounds[t as usize], dbuspath, conn))
+			.collect::<Vec<_>>()
+			.try_into() else {
+				panic!("ThresholdBoundType::iter() produced wrong number of elements?");
+			};
+		let threshold = thresholds[cfg.severity as usize].get_or_insert_with(|| Threshold { bounds });
 
 		let bound = &mut threshold.bounds[cfg.kind as usize];
 
@@ -232,21 +242,20 @@ struct ThresholdBoundIntfMsgFns {
 }
 
 pub struct ThresholdIntfMsgFns {
-	high: ThresholdBoundIntfMsgFns,
-	low: ThresholdBoundIntfMsgFns,
+	bounds: ThresholdBoundTypeArray<ThresholdBoundIntfMsgFns>,
 }
 
 pub type ThresholdIntfDataArr = ThresholdSeverityArray<SensorIntf<ThresholdIntfMsgFns>>;
 
-fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, tag: &str, kind: ThresholdBoundType) -> ThresholdBoundIntfMsgFns
+fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, kind: ThresholdBoundType) -> ThresholdBoundIntfMsgFns
 {
-	let value = b.property(format!("{}{}", sev.to_str(), tag))
+	let value = b.property(format!("{}{}", sev.to_str(), kind.direction_tag()))
 		.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].value.get()))
 		.emits_changed_true()
 		.changed_msg_fn()
 		.into();
 
-	let alarm = b.property(format!("{}Alarm{}", sev.to_str(), tag))
+	let alarm = b.property(format!("{}Alarm{}", sev.to_str(), kind.direction_tag()))
 		.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].alarm.get()))
 		.emits_changed_true()
 		.changed_msg_fn()
@@ -260,10 +269,13 @@ fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: Thr
 
 fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<ThresholdIntfMsgFns> {
 	build_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
-		ThresholdIntfMsgFns {
-			high: build_threshold_bound_intf(b, sev, "High", ThresholdBoundType::Upper),
-			low: build_threshold_bound_intf(b, sev, "Low", ThresholdBoundType::Lower),
-		}
+		let Ok(bounds) = ThresholdBoundType::iter()
+			.map(|t| build_threshold_bound_intf(b, sev, t))
+			.collect::<Vec<_>>()
+			.try_into() else {
+				panic!("ThresholdBoundType::iter() produced wrong number of elements?");
+			};
+		ThresholdIntfMsgFns { bounds }
 	})
 }
 

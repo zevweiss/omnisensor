@@ -1,3 +1,5 @@
+//! Backend-independent code for implementing and managing sensors.
+
 use std::{
 	collections::HashMap,
 	sync::{Arc, Mutex as SyncMutex},
@@ -31,6 +33,7 @@ use crate::adc;
 #[cfg(feature = "peci")]
 use crate::peci;
 
+/// The type of a sensor.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SensorType {
 	Temperature,
@@ -41,6 +44,7 @@ pub enum SensorType {
 }
 
 impl SensorType {
+	/// Return the dbus string used to represent the unit associated with a [`SensorType`].
 	fn dbus_unit_str(&self) -> &'static str {
 		match self {
 			Self::Temperature => "xyz.openbmc_project.Sensor.Value.Unit.DegreesC",
@@ -51,6 +55,8 @@ impl SensorType {
 		}
 	}
 
+	/// Return the category in the dbus sensors hierarchy for a [`SensorType`] (i.e. a
+	/// dbus path component).
 	pub fn dbus_category(&self) -> &'static str {
 		match self {
 			Self::Temperature => "temperature",
@@ -61,6 +67,8 @@ impl SensorType {
 		}
 	}
 
+	/// Return the (multiplicative) scaling factor to convert a raw hwmon reading to
+	/// the corresponding natural unit.
 	pub fn hwmon_scale(&self) -> f64 {
 		const UNIT: f64 = 1.0;
 		const MILLI: f64 = 0.001;
@@ -74,6 +82,7 @@ impl SensorType {
 		}
 	}
 
+	/// Return the sensor type indicated by the given hwmon type tag (filename prefix).
 	pub fn from_hwmon_typetag(tag: &str) -> Option<Self> {
 		match tag {
 			"temp" => Some(Self::Temperature),
@@ -86,6 +95,7 @@ impl SensorType {
 	}
 }
 
+/// An enum of config data all supported sensor types.
 pub enum SensorConfig {
 	Hwmon(hwmon::HwmonSensorConfig),
 
@@ -97,9 +107,14 @@ pub enum SensorConfig {
 }
 
 impl SensorConfig {
-	// Some(Ok(_)) -> successful parse
-	// Some(Err(_)) -> tried to parse a config, but something was wrong with it
-	// None -> not a configuration, no attempt at parsing
+	/// Construct a [`SensorConfig`] from dbus properties `props`
+	///
+	/// `props` should be the entry for `intf` in `all_intfs`.
+	///
+	/// Returns:
+	///  * `Some(Ok(_))`: successful parse.
+	///  * `Some(Err(_))`: we tried to parse a config, but something was wrong with it.
+	///  * `None`: `intf` isn't a sensor configuration, no attempt at parsing.
 	pub fn from_dbus(props: &dbus::arg::PropMap, intf: &str, all_intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<ErrResult<Self>> {
 		let parts: Vec<&str> = intf.split('.').collect();
 		if parts.len() != 4 || parts[0] != "xyz" || parts[1] != "openbmc_project" || parts[2] != "Configuration" {
@@ -128,13 +143,16 @@ impl SensorConfig {
 	}
 }
 
+/// A map of all sensor configs retrieved from entity-manager.
 pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 
+/// An enum of underlying I/O mechanisms used to retrieve sensor readings.
 pub enum SensorIO {
 	Sysfs(sysfs::SysfsSensorIO),
 }
 
 impl SensorIO {
+	/// Read a sample for a sensor.
 	async fn read(&mut self) -> ErrResult<f64> {
 		match self {
 			Self::Sysfs(x) => x.read(),
@@ -142,24 +160,33 @@ impl SensorIO {
 	}
 }
 
+/// A [`SensorIO`] plus some surrounding context.
 pub struct SensorIOCtx {
+	/// The sensor I/O mechanism.
 	io: SensorIO,
+	/// A GPIO that must be asserted before reading the sensor.
 	bridge_gpio: Option<BridgeGPIO>,
+	/// A reference to an I2C device associated with the sensor.
 	i2cdev: Option<Arc<I2CDevice>>,
 }
 
+/// A [`SensorIOCtx`] plus a running task for updating it.
 struct SensorIOTask {
+	/// The sensor I/O context.
 	ctx: SensorIOCtx,
+	/// A running task periodically sampling the sensor.
 	update_task: tokio::task::JoinHandle<()>,
 }
 
 impl Drop for SensorIOTask {
+	/// Stops [`SensorIOTask::update_task`] when the [`SensorIOTask`] goes away.
 	fn drop(&mut self) {
 		self.update_task.abort();
 	}
 }
 
 impl SensorIOCtx {
+	/// Create a new sensor I/O context from a given I/O mechanism.
 	pub fn new(io: SensorIO) -> Self {
 		Self {
 			io,
@@ -168,16 +195,19 @@ impl SensorIOCtx {
 		}
 	}
 
+	/// Add a [`BridgeGPIO`] to a sensor I/O context.
 	pub fn with_bridge_gpio(mut self, bridge_gpio: Option<BridgeGPIO>) -> Self {
 		self.bridge_gpio = bridge_gpio;
 		self
 	}
 
+	/// Add an [`I2CDevice`] to a sensor I/O context.
 	pub fn with_i2cdev(mut self, i2cdev: Option<Arc<I2CDevice>>) -> Self {
 		self.i2cdev = i2cdev;
 		self
 	}
 
+	/// Take a sample from the sensor, asserting its bridge GPIO if required.
 	pub async fn read(&mut self) -> ErrResult<f64> {
 		let _gpio_hold = match self.bridge_gpio.as_mut().map(|g| g.activate()) {
 			Some(x) => Some(x.await?),
@@ -187,30 +217,53 @@ impl SensorIOCtx {
 	}
 }
 
+/// The top-level representation of a sensor.
 pub struct Sensor {
+	/// The globally-unique name of the sensor.
 	pub name: String,
+	/// The dbus path of the sensor object.
 	dbuspath: Arc<SensorPath>,
+	/// The type of the sensor.
 	pub kind: SensorType,
+	/// The period of the sensor polling loop.
 	poll_interval: Duration,
+	/// The host power state in which this sensor is enabled.
 	pub power_state: PowerState,
+	/// Threshold values (warning, critical, etc.) for the sensor.
 	pub thresholds: ThresholdArr,
 
-	// This is only the config-specified scaling factor (converted
-	// to a multiplier); scaling to convert sysfs hwmon values to
-	// the desired units (e.g. 0.001 to convert a sysfs millivolt
-	// value to volts) happens elsewhere.
+	/// A multiplicative scaling factor for readings from the sensor.
+	///
+	/// This is only the config-specified scaling factor (converted to a multiplier);
+	/// scaling to convert sysfs hwmon values to the desired units (e.g. 0.001 to
+	/// convert a sysfs millivolt value to volts) happens
+	/// [elsewhere](sysfs::SysfsSensorIO::read).
 	scale: f64,
 
+	/// The dbus property that provides the sensor's value.
 	cache: SignalProp<f64>,
+	/// The dbus property that provides the sensor's minimum value.
 	minvalue: SignalProp<f64>,
+	/// The dbus property that provides the sensor's maximum value.
 	maxvalue: SignalProp<f64>,
+	/// The dbus property that provides the sensor's availability state.
 	available: SignalProp<bool>,
+	/// The dbus property that provides the sensor's functionality state.
 	functional: SignalProp<bool>,
 
+	/// The sensor's running I/O task.
+	///
+	/// This is [`Some`] when the sensor is active and [`None`] when it's inactive
+	/// (e.g. when the host's current power state doesn't match the sensor's
+	/// `power_state`).
 	io: Option<SensorIOTask>,
 }
 
 impl Sensor {
+	/// Construct a new [`Sensor`] with the given parameters.
+	///
+	/// It will initially be disabled (no running I/O task); it can subsequently be
+	/// enabled by a call to its [`activate()`](Sensor::activate) method.
 	pub fn new(name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>) -> Self {
 		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 		let cleanname = name.replace(badchar, "_");
@@ -240,16 +293,22 @@ impl Sensor {
 		}
 	}
 
+	/// Set the sensor's [`poll_interval`](Sensor::poll_interval).
 	pub fn with_poll_interval(mut self, poll_interval: Duration) -> Self {
 		self.poll_interval = poll_interval;
 		self
 	}
 
+	/// Set the sensor's [`power_state`](Sensor::power_state).
 	pub fn with_power_state(mut self, power_state: PowerState) -> Self {
 		self.power_state = power_state;
 		self
 	}
 
+	/// Set the sensor's [`thresholds`](Sensor::thresholds).
+	///
+	/// The thresholds are constructed from the provided config data, interfaces, and
+	/// dbus connection.
 	pub fn with_thresholds_from(mut self, cfg: &[ThresholdConfig],
 				    threshold_intfs: &ThresholdIntfDataArr,
 				    conn: &Arc<SyncConnection>) -> Self {
@@ -258,21 +317,26 @@ impl Sensor {
 		self
 	}
 
+	/// Set the sensor's [`scale`](Sensor::scale).
 	pub fn with_scale(mut self, scale: f64) -> Self {
 		self.scale = scale;
 		self
 	}
 
+	/// Set the sensor's [`maxvalue`](Sensor::maxvalue).
 	pub fn with_maxval(mut self, max: f64) -> Self {
 		self.maxvalue.set(max);
 		self
 	}
 
+	/// Set the sensor's [`minvalue`](Sensor::minvalue).
 	pub fn with_minval(mut self, min: f64) -> Self {
 		self.minvalue.set(min);
 		self
 	}
 
+	/// Set the sensor's [`cache`](Sensor::cache)d value and update the state of its
+	/// [`thresholds`](Sensor::thresholds).
 	async fn set_value(&mut self, newval: f64) {
 		self.cache.set(newval);
 
@@ -283,6 +347,7 @@ impl Sensor {
 		}
 	}
 
+	/// Read a sample from the sensor and perform the ensuing state updates.
 	async fn update(&mut self) -> ErrResult<()> {
 		if let Some(io) = &mut self.io {
 			let val = io.ctx.read().await?;
@@ -293,13 +358,17 @@ impl Sensor {
 		}
 	}
 
+	/// Start a sensor's update task using the provided `ioctx` and mark it available.
+	///
+	/// This is an associated function rather than a method on `self` because it needs
+	/// to pass a weak reference to itself into the future that gets spawned as
+	/// [`update_task`](SensorIOTask::update_task), and we need an [`Arc`] for that.
 	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, ioctx: SensorIOCtx) {
 		let mut s = sensor.lock().await;
 		let poll_interval = s.poll_interval;
 
-		// Use a weak reference in the update task closure so
-		// it doesn't hold a strong reference to the sensor
-		// (which would create a reference loop via
+		// Use a weak reference in the update task closure so it doesn't hold a
+		// strong reference to the sensor (which would create a reference loop via
 		// s.update_task and make it un-droppable)
 		let weakref = Arc::downgrade(&sensor);
 
@@ -310,11 +379,10 @@ impl Sensor {
 					break;
 				};
 
-				// Create the sleep here to schedule the timeout
-				// but don't wait for it (so that the interval
-				// includes the time spent acquiring the lock
-				// and doing the update itself, and hence is the
-				// period of the whole cyclic operation).
+				// Create the sleep here to schedule the timeout but don't
+				// wait for it (so that the interval includes the time
+				// spent acquiring the lock and doing the update itself,
+				// and hence is the period of the whole cyclic operation).
 				let sleep = tokio::time::sleep(poll_interval);
 
 				let mut sensor = sensor.lock().await;
@@ -327,17 +395,16 @@ impl Sensor {
 					eprintln!("BUG: update task running on inactive sensor");
 				}
 
-				// Read the poll interval for the sleep on the
-				// next iteration of the loop
+				// Read the poll interval for the sleep on the next
+				// iteration of the loop
 				poll_interval = sensor.poll_interval;
 
 				drop(sensor); // Release the lock while we sleep
 
-				// Now await the sleep.  Do this after the read
-				// instead of before so the first read happens
-				// promptly (so we avoid a long wait before the
-				// first sample for sensors with large poll
-				// intervals)
+				// Now await the sleep.  Do this after the read instead of
+				// before so the first read happens promptly (so we avoid
+				// a long wait before the first sample for sensors with
+				// large poll intervals)
 				sleep.await;
 			}
 		};
@@ -347,6 +414,9 @@ impl Sensor {
 			update_task: tokio::spawn(update_loop),
 		};
 
+		// It'd be nice to find some way to arrange things such that this error
+		// case (and the mirror one in deactivate()) vanished by construction, but
+		// I haven't been able to do so thus far...
 		if s.io.replace(io).is_some() {
 			eprintln!("BUG: re-activating already-active sensor {}", s.name);
 		}
@@ -354,20 +424,25 @@ impl Sensor {
 		s.available.set(true)
 	}
 
+	/// Stop a sensor's update task and mark it unavailable.
 	pub async fn deactivate(&mut self) {
 		let oldio = self.io.take();
 		if oldio.is_none() {
 			eprintln!("BUG: deactivate already-inactive sensor {}", self.name);
 		}
 
-		// Could just let this go out of scope, but might as well be
-		// explicit (this is what aborts the update task)
+		// Could just let this go out of scope, but might as well be explicit
+		// (this is what aborts the update task)
 		drop(oldio);
 
 		self.set_value(f64::NAN).await;
 		self.available.set(false)
 	}
 
+	/// Publish a sensor's properties on dbus.
+	///
+	/// `cbdata` must contain `self`.  (Perhaps this should instead be an associated
+	/// function that just takes that instead of both separately.)
 	pub fn add_to_dbus(&self, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 			   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
 	{
@@ -387,10 +462,15 @@ impl Sensor {
 	}
 }
 
-// Maps sensor names to Sensors
+/// Maps sensor names to Sensors.
 pub type SensorMap = HashMap<String, Arc<Mutex<Sensor>>>;
+/// A convenience alias for use with [`get_nonactive_sensor_entry()`] and [`install_or_activate()`].
 pub type SensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<Mutex<Sensor>>>;
 
+/// Find a [`SensorMap`] entry for the given `key`.
+///
+/// Returns [`Some`] if there was no previous entry for `key` or if the sensor for `key`
+/// is inactive.  If there is an active sensor for `key`, returns [`None`].
 pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) -> Option<SensorMapEntry<'_>>
 {
 	let entry = sensors.entry(key);
@@ -402,6 +482,12 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) ->
 	Some(entry)
 }
 
+/// Given a [`SensorMapEntry`] from [`get_nonactive_sensor_entry()`], either activate the
+/// inactive sensor or instantiate a new one.
+///
+/// If needed (there's no existing inactive sensor), a new sensor is constructed by
+/// calling `ctor()`, added to dbus, and inserted into `entry`.  In either case, the
+/// sensor is activated with `io` as its I/O context.
 pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 				    io: SensorIOCtx, sensor_intfs: &SensorIntfData, ctor: F)
 	where F: FnOnce() -> Sensor
@@ -420,6 +506,11 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 	};
 }
 
+/// Build a sensor dbus interface called `intf`.
+///
+/// The properties of the interface are constructed by calling `mkprops()`, which returns
+/// a struct of [`PropChgMsgFn`]s (e.g. [`ValueIntfMsgFns`]), which are returned in
+/// combination with the [`token`](dbus_crossroads::IfaceToken) created for the interface.
 pub fn build_intf<T, F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> SensorIntf<T>
 	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
 {
@@ -434,6 +525,8 @@ pub fn build_intf<T, F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprop
 	}
 }
 
+/// A collection of [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Value`
+/// interface.
 pub struct ValueIntfMsgFns {
 	pub unit: Arc<PropChgMsgFn>,
 	pub value: Arc<PropChgMsgFn>,
@@ -441,6 +534,9 @@ pub struct ValueIntfMsgFns {
 	pub maxvalue: Arc<PropChgMsgFn>,
 }
 
+/// Construct a property for a sensor interface.
+///
+/// The value will be retrieved by calling `getter()` on the sensor.
 fn build_sensor_property<F, R>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>, name: &str, getter: F) -> Box<PropChgMsgFn>
 where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::arg::Arg + dbus::arg::Append + Send + 'static
 {
@@ -456,6 +552,7 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 		.changed_msg_fn()
 }
 
+/// Construct the `xyz.openbmc_project.Sensor.Value` interface.
 fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<ValueIntfMsgFns> {
 	build_intf(cr, "xyz.openbmc_project.Sensor.Value", |b| {
 		ValueIntfMsgFns {
@@ -467,10 +564,13 @@ fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<V
 	})
 }
 
+/// The [`PropChgMsgFn`] for the `xyz.openbmc_project.State.Decorator.Availability`
+/// interface.
 pub struct AvailabilityIntfMsgFns {
 	pub available: Arc<PropChgMsgFn>,
 }
 
+/// Construct the `xyz.openbmc_project.State.Decorator.Availability` interface.
 fn build_availability_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<AvailabilityIntfMsgFns> {
 	build_intf(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
 		AvailabilityIntfMsgFns {
@@ -479,10 +579,13 @@ fn build_availability_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<A
 	})
 }
 
+/// The [`PropChgMsgFn`] for the `xyz.openbmc_project.State.Decorator.OperationalStatus`
+/// interface.
 pub struct OpStatusIntfMsgFns {
 	pub functional: Arc<PropChgMsgFn>,
 }
 
+/// Construct the `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
 fn build_opstatus_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<OpStatusIntfMsgFns> {
 	build_intf(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
 		OpStatusIntfMsgFns {
@@ -491,13 +594,20 @@ fn build_opstatus_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<OpSta
 	})
 }
 
+/// The aggregate of all the dbus interfaces for a sensor.
 pub struct SensorIntfData {
+	/// The `xyz.openbmc_project.Sensor.Value` interface.
 	pub value: SensorIntf<ValueIntfMsgFns>,
+	/// The `xyz.openbmc_project.State.Decorator.Availability` interface.
 	pub availability: SensorIntf<AvailabilityIntfMsgFns>,
+	/// The `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
 	pub opstatus: SensorIntf<OpStatusIntfMsgFns>,
+	/// A per-severity-level array of `xyz.openbmc_project.Sensor.Threshold.$severity`
+	/// interfaces.
 	pub thresholds: threshold::ThresholdIntfDataArr,
 }
 
+/// Construct [`SensorIntfData`].
 pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfData {
 	SensorIntfData {
 		value: build_sensor_value_intf(cr),
@@ -507,6 +617,8 @@ pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfDat
 	}
 }
 
+/// Iterate through a sensor map and deactivate all the sensors whose
+/// [`power_state`](Sensor::power_state) no longer matches the current host power state.
 pub async fn deactivate(sensors: &mut SensorMap) {
 	for sensor in sensors.values_mut() {
 		let sensor = &mut *sensor.lock().await;
@@ -520,6 +632,7 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 	}
 }
 
+/// Synchronize the set of extant sensors to match the given `cfg`.
 pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
 			filter: &FilterSet<InventoryPath>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
 			cr: &SyncMutex<dbus_crossroads::Crossroads>, conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {

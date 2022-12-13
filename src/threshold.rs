@@ -262,7 +262,7 @@ fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> S
 	build_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
 		ThresholdIntfMsgFns {
 			high: build_threshold_bound_intf(b, sev, "High", |t| &t.high),
-			low: build_threshold_bound_intf(b, sev, "low", |t| &t.low),
+			low: build_threshold_bound_intf(b, sev, "Low", |t| &t.low),
 		}
 	})
 }

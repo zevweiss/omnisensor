@@ -96,6 +96,38 @@ pub enum SensorConfig {
 	PECI(peci::PECISensorConfig),
 }
 
+impl SensorConfig {
+	// Some(Ok(_)) -> successful parse
+	// Some(Err(_)) -> tried to parse a config, but something was wrong with it
+	// None -> not a configuration, no attempt at parsing
+	pub fn from_dbus(props: &dbus::arg::PropMap, intf: &str, all_intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<ErrResult<Self>> {
+		let parts: Vec<&str> = intf.split('.').collect();
+		if parts.len() != 4 || parts[0] != "xyz" || parts[1] != "openbmc_project" || parts[2] != "Configuration" {
+				return None;
+		}
+		let cfgtype = parts[3];
+
+		let res = match cfgtype {
+			#[cfg(feature = "adc")]
+			"ADC" => adc::ADCSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::ADC),
+
+			"LM25066"|"W83773G"|"NCT6779" => hwmon::HwmonSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::Hwmon),
+
+			#[cfg(feature = "peci")]
+			"XeonCPU" => peci::PECISensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::PECI),
+
+			_ => {
+				println!("\t{}:", intf);
+				for (p, v) in props {
+					println!("\t\t{}: {:?}", p, v);
+				}
+				Err(err_unsupported(format!("unsupported Configuration type '{}'", cfgtype)))
+			}
+		};
+		Some(res)
+	}
+}
+
 pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 
 pub enum SensorIO {

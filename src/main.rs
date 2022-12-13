@@ -49,66 +49,19 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	let mut result = SensorConfigMap::new();
 
 	'objloop: for (path, submap) in objs.into_iter().map(|(p, s)| (InventoryPath(p.clone()), s)) {
-		println!("managed object: {}", path.0);
 		for (k, props) in &submap {
-			let parts: Vec<&str> = k.split('.').collect();
-			if parts.len() != 4
-				|| parts[0] != "xyz"
-				|| parts[1] != "openbmc_project"
-				|| parts[2] != "Configuration" {
-				continue
-			}
-			let cfgtype = parts[3];
-
-			match cfgtype {
-				#[cfg(feature = "adc")]
-				"ADC" => {
-					let cfg = match adc::ADCSensorConfig::from_dbus(props, k, &submap) {
-						Ok(c) => c,
-						Err(e) => {
-							eprintln!("{}: malformed config data: {}", path.0, e);
-							continue;
-						},
-					};
-					println!("\t{:?}", cfg);
-					result.insert(Arc::new(path), SensorConfig::ADC(cfg));
-					continue 'objloop;
-				}
-
-				"LM25066"|"W83773G"|"NCT6779" => {
-					let cfg = match hwmon::HwmonSensorConfig::from_dbus(props, k, &submap) {
-						Ok(c) => c,
-						Err(e) => {
-							eprintln!("{}: malformed config data: {}", path.0, e);
-							continue;
-						},
-					};
-					println!("\t{:?}", cfg);
-					result.insert(Arc::new(path), SensorConfig::Hwmon(cfg));
-					continue 'objloop;
+			let Some(cfg) = SensorConfig::from_dbus(props, k, &submap) else {
+				continue;
+			};
+			let cfg = match cfg {
+				Ok(cfg) => cfg,
+				Err(e) => {
+					eprintln!("{}, {}: {}", path.0, k, e);
+					continue;
 				},
-
-				#[cfg(feature = "peci")]
-				"XeonCPU" => {
-					let cfg = match peci::PECISensorConfig::from_dbus(props, k, &submap) {
-						Ok(c) => c,
-						Err(e) => {
-							eprintln!("{}: malformed config data: {}", path.0, e);
-							continue;
-						},
-					};
-					println!("\t{:?}", cfg);
-					result.insert(Arc::new(path), SensorConfig::PECI(cfg));
-					continue 'objloop;
-				},
-
-				_ => {
-					println!("\t{}:", k);
-					for (p, v) in props {
-						println!("\t\t{}: {:?}", p, v);
-					}
-				}
-			}
+			};
+			result.insert(Arc::new(path), cfg);
+			continue 'objloop;
 		}
 	}
 	Ok(result)

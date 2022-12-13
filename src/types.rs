@@ -30,6 +30,12 @@ pub fn err_invalid_data<E>(msg: E) -> Box<dyn Error>
 	mk_err(ErrorKind::InvalidData, msg)
 }
 
+pub fn err_unsupported<E>(msg: E) -> Box<dyn Error>
+	where E: Into<Box<dyn Error + Send + Sync>>
+{
+	mk_err(ErrorKind::Unsupported, msg)
+}
+
 pub fn err_other<E>(msg: E) -> Box<dyn Error>
 	where E: Into<Box<dyn Error + Send + Sync>>
 {

@@ -1,3 +1,7 @@
+//! Backend providing support for Intel PECI sensors.
+//!
+//! A la dbus-sensors's `intelcpusensor` daemon.
+
 use std::{
 	collections::HashMap,
 	path::Path,
@@ -23,32 +27,55 @@ use crate::{
 	dbus_helpers::props::*,
 };
 
+/// Internal representation of the dbus config data for a PECI sensor.
+///
+/// Aside from what's here, there's also a `"PresenceGPIO"` key in a few E-M configs:
+///
+/// ```
+/// "PresenceGPIO": [{ "Name": "...", "Polarity": "..."}]
+/// ```
+///
+/// It seems to be ignored by `intelcpusensor` as far as I can tell though, so we're
+/// ignoring it here too (for now at least).  (Also, it's not clear to me why the object
+/// is wrapped in an array.)
 #[derive(Debug)]
 pub struct PECISensorConfig {
+	/// Name of the sensor.
+	///
+	/// FIXME: Is this used for anything?  Need to figure this out.
 	name: String,
+	/// The ID number of the CPU.
+	///
+	/// FIXME: Is this used for anything?  Need to figure this out.
 	cpuid: u64,
+	/// The PECI bus number of the CPU.
 	bus: u64,
+	/// The PECI address of the CPU.
 	address: u64,
+	/// The DTS critical offset if provided, 0.0 by default.
+	///
+	/// This is used as a threshold hysteresis value that optionally overrides what
+	/// the kernel provides.
 	dts_crit_offset: f64,
+	/// Threshold settings for the sensor.
+	///
+	/// At least in `intelcpusensor`, the threshold information in sysfs is ignored if
+	/// any of these are provided.
 	thresholds: Vec<threshold::ThresholdConfig>,
-
-	// PresenceGPIO in a few E-M configs, seems to be ignored by
-	// dbus-sensors though:
-	//   [ { Name: "...", Polarity: "..." } ]
-	// (why the array i dunno)
 }
 
+/// The top-level sysfs directory via which we interact with the kernel's PECI subsystem.
 const PECI_BUS_DIR: &str = "/sys/bus/peci";
 
-// The kernel PECI subsustem's sysfs interface doesn't expose an
-// interface to instantiate a device at a given address; it simply
-// allows triggering a global rescan operation, so this isn't tied to
-// any particular device.
+/// The kernel PECI subsystem doesn't expose a sysfs interface to instantiate a device for
+/// a given bus/address; it simply allows triggering a global rescan operation, so this
+/// isn't tied to any particular device.
 fn rescan() -> ErrResult<()> {
 	Ok(std::fs::write(Path::new(PECI_BUS_DIR).join("rescan"), "1")?)
 }
 
 impl PECISensorConfig {
+	/// Construct a [`PECISensorConfig`] from raw dbus data.
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let cpuid: u64 = *prop_get_mandatory(basecfg, "CpuID")?;
@@ -74,6 +101,7 @@ impl PECISensorConfig {
 	}
 }
 
+/// Instantiate any active PECI sensors configured in `cfgmap`.
 pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 			    dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 			    conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {

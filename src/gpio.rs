@@ -46,10 +46,11 @@ pub struct BridgeGPIO {
 	line: gpiocdev::FoundLine,
 	cfg: Arc<BridgeGPIOConfig>,
 	req: gpiocdev::request::Request,
+	active: bool,
 }
 
 pub struct BridgeGPIOActivation<'a> {
-	gpio: &'a BridgeGPIO
+	gpio: &'a mut BridgeGPIO
 }
 
 impl BridgeGPIO {
@@ -72,17 +73,21 @@ impl BridgeGPIO {
 				    cfg.polarity)
 			.request()?;
 
-
 		Ok(Self {
 			line,
 			cfg,
 			req,
+			active: false,
 		})
 	}
 
-	pub async fn activate(&self) -> ErrResult<BridgeGPIOActivation<'_>> {
+	pub async fn activate(&mut self) -> ErrResult<BridgeGPIOActivation<'_>> {
+		if self.active {
+			return Err(err_other("GPIO activation already held"));
+		}
 		self.req.set_value(self.line.offset, gpiocdev::line::Value::Active)?;
 		tokio::time::sleep(self.cfg.setup_time).await;
+		self.active = true;
 		Ok(BridgeGPIOActivation {
 			gpio: self,
 		})
@@ -94,5 +99,6 @@ impl Drop for BridgeGPIOActivation<'_> {
 		if let Err(e) = self.gpio.req.set_value(self.gpio.line.offset, gpiocdev::line::Value::Inactive) {
 			eprintln!("failed to reset bridge gpio {}: {}", self.gpio.cfg.name, e);
 		}
+		self.gpio.active = false;
 	}
 }

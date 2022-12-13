@@ -179,7 +179,7 @@ impl SensorIOCtx {
 	}
 
 	pub async fn read(&mut self) -> ErrResult<f64> {
-		let _gpio_hold = match self.bridge_gpio.as_ref().map(|g| g.activate()) {
+		let _gpio_hold = match self.bridge_gpio.as_mut().map(|g| g.activate()) {
 			Some(x) => Some(x.await?),
 			None => None,
 		};

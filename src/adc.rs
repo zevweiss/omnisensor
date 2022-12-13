@@ -88,9 +88,9 @@ impl ADCSensorConfig {
 const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
 /// Instantiate any active ADC sensors configured in `cfgmap`.
-pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
-			    dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-			    conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
+pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
+				 dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
+				 conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
 	let hwmondir = sysfs::get_single_hwmon_dir(IIO_HWMON_PATH)?;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {

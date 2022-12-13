@@ -632,25 +632,25 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 	}
 }
 
-/// Synchronize the set of extant sensors to match the given `cfg`.
-pub async fn update_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
-			filter: &FilterSet<InventoryPath>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
-			cr: &SyncMutex<dbus_crossroads::Crossroads>, conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
+/// Instantiate sensors from all backends to match the given `cfg`.
+pub async fn instantiate_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
+			     filter: &FilterSet<InventoryPath>, i2cdevs: &Mutex<i2c::I2CDeviceMap>,
+			     cr: &SyncMutex<dbus_crossroads::Crossroads>, conn: &Arc<SyncConnection>, intfs: &SensorIntfData) {
 	let cfg = cfg.lock().await;
 	let mut sensors = sensors.lock().await;
 
 	#[cfg(feature = "adc")]
-	adc::update_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
-		eprintln!("Failed to update ADC sensors: {}", e);
+	adc::instantiate_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
+		eprintln!("Failed to instantiate ADC sensors: {}", e);
 	});
 
 	#[cfg(feature = "peci")]
-	peci::update_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
-		eprintln!("Failed to update PECI sensors: {}", e);
+	peci::instantiate_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
+		eprintln!("Failed to instantiate PECI sensors: {}", e);
 	});
 
 	let mut i2cdevs = i2cdevs.lock().await;
-	hwmon::update_sensors(&cfg, &mut sensors, filter, &mut i2cdevs, cr, intfs, conn).await.unwrap_or_else(|e| {
-		eprintln!("Failed to update hwmon sensors: {}", e);
+	hwmon::instantiate_sensors(&cfg, &mut sensors, filter, &mut i2cdevs, cr, intfs, conn).await.unwrap_or_else(|e| {
+		eprintln!("Failed to instantiate hwmon sensors: {}", e);
 	});
 }

@@ -154,7 +154,7 @@ async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMa
 		*cfg.lock().await = newcfg;
 	}
 
-	sensor::update_all(cfg, sensors, &filter, i2cdevs, cr, bus, sensor_intfs).await;
+	sensor::instantiate_all(cfg, sensors, &filter, i2cdevs, cr, bus, sensor_intfs).await;
 }
 
 /// The entry point of the daemon.
@@ -200,11 +200,11 @@ async fn main() -> ErrResult<()> {
 
 	drop(crlock);
 
-	sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
+	sensor::instantiate_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
-			sensor::update_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
+			sensor::instantiate_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
 		} else {
 			let mut sensors = sensors.lock().await;
 			sensor::deactivate(&mut sensors).await;

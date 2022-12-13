@@ -157,10 +157,10 @@ fn name_for_label(label: &str) -> &str {
 }
 
 /// Instantiate any active PMBus/I2C hwmon sensors configured in `cfgmap`.
-pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
-			    dbuspaths: &FilterSet<InventoryPath>, i2cdevs: &mut I2CDeviceMap,
-			    cr: &SyncMutex<dbus_crossroads::Crossroads>, sensor_intfs: &SensorIntfData,
-			    conn: &Arc<SyncConnection>) ->ErrResult<()> {
+pub async fn instantiate_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
+				 dbuspaths: &FilterSet<InventoryPath>, i2cdevs: &mut I2CDeviceMap,
+				 cr: &SyncMutex<dbus_crossroads::Crossroads>, sensor_intfs: &SensorIntfData,
+				 conn: &Arc<SyncConnection>) ->ErrResult<()> {
 	let configs = cfg.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {

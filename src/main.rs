@@ -1,3 +1,9 @@
+//! omnisensor: a unified OpenBMC sensor daemon.
+//!
+//! Configuration data retrieved from entity-manager is used to
+//! instantiate sensor objects that present readings and other data
+//! (units, thresholds, operational status, etc.) via dbus.
+
 use std::{
 	collections::{HashMap, HashSet},
 	sync::{Arc, Mutex as SyncMutex},
@@ -39,9 +45,13 @@ use sensor::{
 	SensorMap,
 };
 
+/// The dbus name claimed by the daemon.
 const DBUS_NAME: &str = "xyz.openbmc_project.OmniSensor";
+
+/// The dbus service from which we retrieve config data.
 const ENTITY_MANAGER_NAME: &str = "xyz.openbmc_project.EntityManager";
 
+/// Retrieve sensor config data from entity-manager via dbus.
 async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, "/xyz/openbmc_project/inventory",
 				     Duration::from_secs(30), bus);
@@ -67,6 +77,11 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	Ok(result)
 }
 
+/// Arranges for `cb` to be called on receipt of any `PropertiesChanged` dbus
+/// signals.
+///
+/// `cb` is passed the signal message, the dbus interface to which it pertains,
+/// and the associated properties.
 async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) -> ErrResult<nonblock::MsgMatch>
 	where H: FnOnce(dbus::message::Message, String, dbus::arg::PropMap) -> R + Send + Copy + Sync + 'static,
 	      R: futures::Future<Output = ()> + Send
@@ -92,6 +107,7 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 	Ok(signal)
 }
 
+/// A helper function for handling dbus `PropertiesChanged` signals.
 async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
 			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<InventoryPath>>>,
 			   cr: &SyncMutex<dbus_crossroads::Crossroads>, msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
@@ -141,6 +157,7 @@ async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMa
 	sensor::update_all(cfg, sensors, &filter, i2cdevs, cr, bus, sensor_intfs).await;
 }
 
+/// The entry point of the daemon.
 #[tokio::main]
 async fn main() -> ErrResult<()> {
 	let (sysbus_resource, sysbus) = connection::new_system_sync()?;

@@ -91,7 +91,7 @@ const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 				 dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
 				 conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
-	let hwmondir = sysfs::get_single_hwmon_dir(IIO_HWMON_PATH)?;
+	let hwmondir = sysfs::get_single_hwmon_dir(std::path::Path::new(IIO_HWMON_PATH))?;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {

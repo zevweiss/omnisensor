@@ -1,5 +1,6 @@
 //! Utility code for interacting with sysfs files.
 
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::{
@@ -29,7 +30,7 @@ pub async fn read_and_parse<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> E
 /// Convenience function for cases where we expect a glob to produce exactly one match.
 ///
 /// Returns Ok(_) if so, and Err(_) on multiple matches, no matches, or other errors.
-pub fn get_single_glob_match(pattern: &str) -> ErrResult<std::path::PathBuf> {
+pub fn get_single_glob_match(pattern: &str) -> ErrResult<PathBuf> {
 	let mut matches = glob::glob(&pattern)?;
 	let first = match matches.next() {
 		Some(m) => m?,
@@ -46,15 +47,15 @@ pub fn get_single_glob_match(pattern: &str) -> ErrResult<std::path::PathBuf> {
 ///
 /// This finds the one that's there, ensures there aren't any others, and returns it
 /// (including whatever original prefix was passed).
-pub fn get_single_hwmon_dir(path: &str) -> ErrResult<std::path::PathBuf> {
-	let pattern = format!("{}/hwmon/hwmon[0-9]*", path);
-	get_single_glob_match(&pattern)
+pub fn get_single_hwmon_dir(path: &Path) -> ErrResult<PathBuf> {
+	let pattern = path.join("hwmon/hwmon[0-9]*");
+	get_single_glob_match(&pattern.to_string_lossy())
 }
 
 /// Summary info about a hwmon `*_input` file
 pub struct HwmonFileInfo {
 	/// The full absolute path of the file.
-	pub abspath: std::path::PathBuf,
+	pub abspath: PathBuf,
 
 	/// The filename with `"_input"` stripped off, e.g. `"in1"`, `"temp3"`, etc.
 	///
@@ -72,7 +73,7 @@ pub struct HwmonFileInfo {
 impl HwmonFileInfo {
 	/// Construct a [`HwmonFileInfo`] from the given path.
 	// ...though we don't actually check that it's absolute...should we?
-	pub fn from_abspath(abspath: std::path::PathBuf) -> ErrResult<Self> {
+	pub fn from_abspath(abspath: PathBuf) -> ErrResult<Self> {
 		let mk_err = |msg| {
 			err_invalid_data(format!("{}: {}", abspath.display(), msg))
 		};
@@ -125,8 +126,8 @@ impl HwmonFileInfo {
 /// names start with a certain prefix if `fileprefix` is [`Some`].
 // fileprefix could just be a &str (with "" instead of None), but we might as well make
 // it slightly more explicit.
-pub fn scan_hwmon_input_files(devdir: &std::path::Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {
-	let hwmondir = get_single_hwmon_dir(&devdir.to_string_lossy())?;
+pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {
+	let hwmondir = get_single_hwmon_dir(devdir)?;
 	let pattern = hwmondir.join(format!("{}*_input", fileprefix.unwrap_or("")));
 	let mut info: Vec<_> = glob::glob(&pattern.to_string_lossy())?
 		.filter_map(|g| {

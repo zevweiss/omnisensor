@@ -66,7 +66,7 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 			let cfg = match cfg {
 				Ok(cfg) => cfg,
 				Err(e) => {
-					eprintln!("{}, {}: {}", path.0, k, e);
+					eprintln!("{:?}, {}: {}", path, k, e);
 					continue;
 				},
 			};

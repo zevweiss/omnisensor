@@ -96,10 +96,10 @@ pub struct SensorIntf<T> {
 
 /// A newtype for a dbus path to reduce the likelihood of mixing up inventory
 /// paths and sensor paths.
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct InventoryPath(pub dbus::Path<'static>);
 
 /// A newtype for a dbus path to reduce the likelihood of mixing up inventory
 /// paths and sensor paths.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SensorPath(pub dbus::Path<'static>);

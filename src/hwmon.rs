@@ -19,6 +19,8 @@ use crate::{
 	i2c::{
 		I2CDeviceParams,
 		I2CDeviceMap,
+		I2CDeviceType,
+		get_hwmon_devtype,
 		get_i2cdev,
 	},
 	powerstate::PowerState,
@@ -107,6 +109,13 @@ static PSU_TYPES: phf::Set<&'static str> = phf_set! {
 	"XDPE12284"
 };
 
+/// Retrieve an I2CDeviceType for the given string.
+///
+/// Either a PMBus or a basic I2C hwmon device type.
+fn get_devtype(s: &str) -> Option<I2CDeviceType> {
+	PSU_TYPES.get_key(s).copied().map(I2CDeviceType).or_else(|| get_hwmon_devtype(s))
+}
+
 /// A small enum used to distinguish PMBus sensors from "basic" hwmon sensors.
 ///
 /// (Naming is based on the corresponding dbus-sensors daemons; could perhaps be changed.)
@@ -133,7 +142,10 @@ impl HwmonSensorConfig {
 				break;
 			}
 		}
-		let i2c = I2CDeviceParams::from_dbus(basecfg, &r#type)?;
+		let Some(devtype) = get_devtype(&r#type) else {
+			return Err(err_unsupported(format!("unsupported device type '{}'", r#type)));
+		};
+		let i2c = I2CDeviceParams::from_dbus(basecfg, devtype)?;
 		let enabled_labels: FilterSet<String> = prop_get_optional(basecfg, "Labels")?
 			.map(|v: &Vec<_>| HashSet::from_iter(v.iter().cloned()))
 			.into();
@@ -162,7 +174,7 @@ impl HwmonSensorConfig {
 
 	/// Return the subtype of the sensor configuration.
 	fn subtype(&self) -> HwmonSubType {
-		if PSU_TYPES.contains(&self.i2c.devtype) {
+		if PSU_TYPES.contains(&self.i2c.devtype.0) {
 			HwmonSubType::PSU
 		} else {
 			HwmonSubType::HwmonTemp

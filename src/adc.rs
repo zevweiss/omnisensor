@@ -83,9 +83,13 @@ pub async fn update_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
 		});
 	for adccfg in configs {
 		let path = hwmondir.join(format!("in{}_input", adccfg.index + 1));
-		let Some(file) = sysfs::HwmonFileInfo::from_abspath(path) else {
-			eprintln!("{}: No input file found for index {}", adccfg.name, adccfg.index);
-			continue;
+		let file = match sysfs::HwmonFileInfo::from_abspath(path) {
+			Ok(f) => f,
+			Err(e) => {
+				eprintln!("{}: Error getting input file found for index {}: {}", adccfg.name,
+					  adccfg.index, e);
+				continue;
+			},
 		};
 
 		if !adccfg.power_state.active_now() {

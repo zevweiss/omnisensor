@@ -60,37 +60,32 @@ pub struct HwmonFileInfo {
 }
 
 impl HwmonFileInfo {
-	pub fn from_abspath(abspath: std::path::PathBuf) -> Option<Self> {
-		let warn_skipped = |msg| {
-			eprintln!("Warning: don't know how to handle {} ({}), skipping",
-				  abspath.display(), msg);
+	pub fn from_abspath(abspath: std::path::PathBuf) -> ErrResult<Self> {
+		let mk_err = |msg| {
+			err_invalid_data(format!("{}: {}", abspath.display(), msg))
 		};
 
 		let base = match abspath.file_name().map(|p| p.to_string_lossy()) {
-			Some(s) => s.strip_suffix("_input")?
+			Some(s) => s.strip_suffix("_input")
+				.ok_or_else(|| mk_err("no \"_input\" suffix"))?
 				.to_string(),
-			_ => {
-				warn_skipped("no file name?");
-				return None;
-			},
+			_ => return Err(err_invalid_data("no file name")),
 		};
 
 		let typetag = base.trim_end_matches(|c: char| c.is_ascii_digit());
 		let Some(kind) = SensorType::from_hwmon_typetag(typetag) else {
 			let msg = format!("unrecognized hwmon type tag '{}'", typetag);
-			warn_skipped(&msg);
-			return None;
+			return Err(mk_err(&msg));
 		};
 
 		// unwrap because we're stripping a prefix
 		// that we know is there
 		let Ok(idx) = base.strip_prefix(typetag).unwrap().parse::<usize>() else {
 			let msg = format!("couldn't parse index from '{}'", base);
-			warn_skipped(&msg);
-			return None;
+			return Err(mk_err(&msg));
 		};
 
-		Some(HwmonFileInfo {
+		Ok(HwmonFileInfo {
 			kind,
 			idx,
 			base,
@@ -116,7 +111,13 @@ pub fn scan_hwmon_input_files(devdir: &std::path::Path, fileprefix: Option<&str>
 	let mut info: Vec<_> = glob::glob(&pattern.to_string_lossy())?
 		.filter_map(|g| {
 			match g {
-				Ok(abspath) => HwmonFileInfo::from_abspath(abspath),
+				Ok(abspath) => match HwmonFileInfo::from_abspath(abspath) {
+					Ok(f) => Some(f),
+					Err(e) => {
+						eprintln!("Warning: {} (skipping)", e);
+						None
+					}
+				},
 				Err(e) => {
 					eprintln!("Warning: error scanning {}, skipping entry: {}",
 						  hwmondir.display(), e);

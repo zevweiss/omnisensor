@@ -1,3 +1,5 @@
+//! Utility code for managing sensor thresholds.
+
 use std::{
 	collections::HashMap,
 	sync::Arc,
@@ -21,6 +23,7 @@ use crate::{
 	},
 };
 
+/// The severity level of a threshold.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, EnumCount)]
 pub enum ThresholdSeverity {
 	Warning = 0,
@@ -31,6 +34,7 @@ pub enum ThresholdSeverity {
 }
 
 impl ThresholdSeverity {
+	/// Return the string form of a severity level.
 	fn to_str(self) -> &'static str {
 		match self {
 			Self::Warning => "Warning",
@@ -42,10 +46,10 @@ impl ThresholdSeverity {
 	}
 }
 
-// dbus config presents this as a float instead of an int for
-// some reason...
 impl TryFrom<&f64> for ThresholdSeverity {
 	type Error = Box<dyn std::error::Error>;
+	/// dbus config for some reason presents this as a float instead of an int (or a
+	/// string), so here we are...
 	fn try_from(n: &f64) -> ErrResult<Self> {
 		match *n as isize {
 			0 => Ok(Self::Warning),
@@ -60,15 +64,20 @@ impl TryFrom<&f64> for ThresholdSeverity {
 	}
 }
 
+/// An array of `T` indexed by [`ThresholdSeverity`].
 type ThresholdSeverityArray<T> = [T; ThresholdSeverity::COUNT];
 
+/// The direction of a threshold bound.
 #[derive(Debug, Copy, Clone, EnumIter, EnumCount)]
 pub enum ThresholdBoundType {
+	/// The threshold bound represent a value the sensor reading should not drop below.
 	Lower = 0,
+	/// The threshold bound represent a value the sensor reading should not exceed.
 	Upper = 1,
 }
 
 impl ThresholdBoundType {
+	/// Return a string representing the bound type.
 	fn direction_tag(&self) -> &'static str {
 		match self {
 			Self::Lower => "Low",
@@ -79,6 +88,7 @@ impl ThresholdBoundType {
 
 impl TryFrom<&str> for ThresholdBoundType {
 	type Error = Box<dyn std::error::Error>;
+	/// Construct a [`ThresholdBoundType`] from its dbus string representation.
 	fn try_from(s: &str) -> ErrResult<Self> {
 		match s {
 			"less than" => Ok(Self::Lower),
@@ -88,19 +98,24 @@ impl TryFrom<&str> for ThresholdBoundType {
 	}
 }
 
+/// An array of `T` indexed by [`ThresholdBoundType`].
 type ThresholdBoundTypeArray<T> = [T; ThresholdBoundType::COUNT];
 
+/// Internal representation of a threshold's config data retrieved from dbus.
 #[derive(Debug, Copy, Clone)]
 pub struct ThresholdConfig {
 	// E-M config also includes a "Name" field, but it doesn't
 	// appear to be used for anything that I can see...
 	kind: ThresholdBoundType,
 	severity: ThresholdSeverity,
+	/// How much the reading needs to recede from `value` after passing it in order to
+	/// reset the alarm status.
 	hysteresis: f64,
 	value: f64,
 }
 
 impl ThresholdConfig {
+	/// Construct a [`ThresholdConfig`] from a set of dbus properties.
 	fn from_dbus(props: &dbus::arg::PropMap) -> ErrResult<Self> {
 		let kind = prop_get_mandatory_from::<str, _>(props, "Direction")?;
 		let severity = prop_get_mandatory_from::<f64, _>(props, "Severity")?;
@@ -120,6 +135,8 @@ impl ThresholdConfig {
 	}
 }
 
+/// Retrieve as many [`ThresholdConfig`]s as are present in `intfs` for the given base
+/// interface `baseintf`.
 pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Vec<ThresholdConfig> {
 	let mut thresholds = vec![];
 	for tidx in 0.. {
@@ -137,13 +154,20 @@ pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::
 	thresholds
 }
 
+/// Represents a single direction of a threshold.
 pub struct ThresholdBound {
+	/// The threshold value.
 	value: SignalProp<f64>,
+	/// See [`ThresholdConfig::hysteresis`].
 	hysteresis: f64,
+	/// Whether or not an alarm for the threshold is currently asserted.
 	alarm: SignalProp<bool>,
 }
 
 impl ThresholdBound {
+	/// Construct a [`ThresholdBound`] for an object at `dbuspath` using the given
+	/// `msgfns` for generating `PropertiesChanged` signal messages and sending them
+	/// via `conn`.
 	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			value: SignalProp::new(f64::NAN, &msgfns.value, dbuspath, conn),
@@ -152,6 +176,8 @@ impl ThresholdBound {
 		}
 	}
 
+	/// Update `self`'s alarm state based on the given direction (`kind`) and `sample`
+	/// value from the sensor.
 	fn update(&mut self, kind: ThresholdBoundType, sample: f64) {
 		if !sample.is_finite() || !self.value.get().is_finite() {
 			return;
@@ -171,11 +197,15 @@ impl ThresholdBound {
 	}
 }
 
+/// A threshold of a single severity (lower and upper bounds).
 pub struct Threshold {
+	/// The lower and upper bounds for a single severity level.
 	bounds: ThresholdBoundTypeArray<ThresholdBound>,
 }
 
 impl Threshold {
+	/// Update both the lower and upper bounds based on the given `sample` value from
+	/// the sensor.
 	pub fn update(&mut self, sample: f64) {
 		for t in ThresholdBoundType::iter() {
 			self.bounds[t as usize].update(t, sample);
@@ -183,8 +213,11 @@ impl Threshold {
 	}
 }
 
+/// A per-severity-level array of threhsolds, as [`Option`]s because they may not have
+/// been specified in the available config data.
 pub type ThresholdArr = ThresholdSeverityArray<Option<Threshold>>;
 
+/// Construct a [`ThresholdArr`] from a slice of config objects.
 pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &ThresholdIntfDataArr,
 				   dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> ThresholdArr {
 	let mut thresholds = ThresholdArr::default();
@@ -222,6 +255,8 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &T
 	thresholds
 }
 
+/// Retrieve a threshold property value from the given `sensor` for the given severity
+/// `sev` via `getter`, sending it back over dbus via `ctx`.
 fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, sensor: &Arc<Mutex<Sensor>>, sev: ThresholdSeverity, getter: F)
 			-> impl futures::Future<Output = std::marker::PhantomData<R>>
 	where F: Fn(&Threshold) -> R, R: dbus::arg::Arg + dbus::arg::RefArg + dbus::arg::Append + 'static
@@ -236,17 +271,22 @@ fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, sensor: &Arc<Mute
 	}
 }
 
+/// [`PropChgMsgFn`]s for a threshold bound's `value` and `alarm` properties.
 struct ThresholdBoundIntfMsgFns {
 	value: Arc<PropChgMsgFn>,
 	alarm: Arc<PropChgMsgFn>,
 }
 
+/// The [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Threshold.*` interfaces.
 pub struct ThresholdIntfMsgFns {
 	bounds: ThresholdBoundTypeArray<ThresholdBoundIntfMsgFns>,
 }
 
+/// An per-severity-level array of threshold interfaces, each of which is a
+/// [`ThresholdIntfMsgFns`] plus a dbus interface token.
 pub type ThresholdIntfDataArr = ThresholdSeverityArray<SensorIntf<ThresholdIntfMsgFns>>;
 
+/// Construct a [`ThresholdBoundIntfMsgFns`] for the given severity `sev` and bound type `kind`.
 fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, kind: ThresholdBoundType) -> ThresholdBoundIntfMsgFns
 {
 	let value = b.property(format!("{}{}", sev.to_str(), kind.direction_tag()))
@@ -267,6 +307,7 @@ fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: Thr
 	}
 }
 
+/// Construct a threshold interface for the given severity `sev`.
 fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<ThresholdIntfMsgFns> {
 	build_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
 		let Ok(bounds) = ThresholdBoundType::iter()
@@ -279,6 +320,7 @@ fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> S
 	})
 }
 
+/// Construct threshold interfaces for all severity levels.
 pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> ThresholdIntfDataArr {
 	let res = ThresholdSeverity::iter()
 		.map(|sev| build_sensor_threshold_intf(cr, sev))

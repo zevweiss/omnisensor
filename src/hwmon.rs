@@ -12,7 +12,6 @@ use dbus::{
 	arg::RefArg,
 	nonblock::SyncConnection,
 };
-use phf::phf_set;
 
 use crate::{
 	types::*,
@@ -20,7 +19,7 @@ use crate::{
 		I2CDeviceParams,
 		I2CDeviceMap,
 		I2CDeviceType,
-		get_hwmon_devtype,
+		get_device_type,
 		get_i2cdev,
 	},
 	powerstate::PowerState,
@@ -59,71 +58,6 @@ pub struct HwmonSensorConfig {
 	enabled_labels: FilterSet<String>,
 }
 
-/// A set of device types known to be PMBus sensors.
-///
-/// While broadly similar, PMBus sensors and "basic" hwmon sensors use somewhat different
-/// config schemas; this is used to determine which one we're dealing with.
-static PSU_TYPES: phf::Set<&'static str> = phf_set! {
-	"ADM1266",
-	"ADM1272",
-	"ADM1275",
-	"ADM1278",
-	"ADM1293",
-	"ADS7830",
-	"BMR490",
-	"DPS800",
-	"INA219",
-	"INA230",
-	"IPSPS",
-	"IR38060",
-	"IR38164",
-	"IR38263",
-	"ISL68137",
-	"ISL68220",
-	"ISL68223",
-	"ISL69225",
-	"ISL69243",
-	"ISL69260",
-	"LM25066",
-	"MAX16601",
-	"MAX20710",
-	"MAX20730",
-	"MAX20734",
-	"MAX20796",
-	"MAX34451",
-	"MP2971",
-	"MP2973",
-	"MP5023",
-	"PLI1209BC",
-	"pmbus",
-	"PXE1610",
-	"RAA228000",
-	"RAA228228",
-	"RAA228620",
-	"RAA229001",
-	"RAA229004",
-	"RAA229126",
-	"TPS53679",
-	"TPS546D24",
-	"XDPE11280",
-	"XDPE12284"
-};
-
-/// Retrieve an I2CDeviceType for the given string.
-///
-/// Either a PMBus or a basic I2C hwmon device type.
-fn get_devtype(s: &str) -> Option<I2CDeviceType> {
-	PSU_TYPES.get_key(s).copied().map(I2CDeviceType).or_else(|| get_hwmon_devtype(s))
-}
-
-/// A small enum used to distinguish PMBus sensors from "basic" hwmon sensors.
-///
-/// (Naming is based on the corresponding dbus-sensors daemons; could perhaps be changed.)
-enum HwmonSubType {
-	PSU,
-	HwmonTemp,
-}
-
 impl HwmonSensorConfig {
 	/// Construct a [`HwmonSensorConfig`] from raw dbus config data.
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
@@ -142,7 +76,7 @@ impl HwmonSensorConfig {
 				break;
 			}
 		}
-		let Some(devtype) = get_devtype(&r#type) else {
+		let Some(devtype) = get_device_type(&r#type) else {
 			return Err(err_unsupported(format!("unsupported device type '{}'", r#type)));
 		};
 		let i2c = I2CDeviceParams::from_dbus(basecfg, devtype)?;
@@ -172,28 +106,19 @@ impl HwmonSensorConfig {
 		})
 	}
 
-	/// Return the subtype of the sensor configuration.
-	fn subtype(&self) -> HwmonSubType {
-		if PSU_TYPES.contains(&self.i2c.devtype.0) {
-			HwmonSubType::PSU
-		} else {
-			HwmonSubType::HwmonTemp
-		}
-	}
-
 	/// Determine the sensor name to use for a given `idx` and `label`.
 	fn sensor_name(&self, idx: usize, label: &str) -> Option<String> {
 		// PSU-style configs and hwmon-style configs use
 		// different naming schemes
-		match self.subtype() {
-			HwmonSubType::PSU => {
+		match self.i2c.devtype {
+			I2CDeviceType::PMBus(_) => {
 				let subname: &str = self.name_overrides.get(label)
 					.map(|s| s.as_str())
 					.unwrap_or_else(|| name_for_label(label));
 
 				Some(format!("{} {}", self.names[0], subname))
 			},
-			HwmonSubType::HwmonTemp => self.names.get(idx).map(|s| s.into()),
+			I2CDeviceType::Hwmon(_) => self.names.get(idx).map(|s| s.into()),
 		}
 	}
 }
@@ -260,9 +185,9 @@ pub async fn update_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			},
 		};
 
-		let prefix = match hwmcfg.subtype() {
-			HwmonSubType::PSU => None,
-			HwmonSubType::HwmonTemp => Some("temp"),
+		let prefix = match hwmcfg.i2c.devtype {
+			I2CDeviceType::PMBus(_) => None,
+			I2CDeviceType::Hwmon(_) => Some("temp"),
 		};
 
 		let sysfs_dir = hwmcfg.i2c.sysfs_device_dir();

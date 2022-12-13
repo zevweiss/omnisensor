@@ -5,7 +5,7 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
-use phf::phf_map;
+use phf::{phf_map, phf_set};
 
 use crate::{
 	types::*,
@@ -14,9 +14,8 @@ use crate::{
 
 /// A map of supported I2C device types.
 ///
-/// Keys are supported I2C device types (in capitalized dbus-config-data form, not the
-/// lowercase form used by the kernel) and whose values are `bool`s indicating whether or
-/// not the device is expected to create a `hwmon` directory when instantiated.
+/// Keys are supported I2C device types values are `bool`s indicating whether or not the
+/// device is expected to create a `hwmon` directory when instantiated.
 ///
 /// Functionally this could be simplified to a set (perhaps even with membership implying
 /// false instead of true to keep it smaller), but listing all known devices explicitly
@@ -46,22 +45,116 @@ static I2C_HWMON_DEVICES: phf::Map<&'static str, bool> = phf_map! {
 	"W83773G"  => true,
 };
 
-/// Retrieve an I2CDeviceType for the given (basic hwmon) device type string.
-pub fn get_hwmon_devtype(s: &str) -> Option<I2CDeviceType> {
-	I2C_HWMON_DEVICES.get_key(s).copied().map(I2CDeviceType)
+/// A set of device types known to be PMBus sensors.
+///
+/// While broadly similar, PMBus sensors and "basic" hwmon sensors use somewhat different
+/// config schemas; this is used to determine which one we're dealing with.
+static I2C_PMBUS_TYPES: phf::Set<&'static str> = phf_set! {
+	"ADM1266",
+	"ADM1272",
+	"ADM1275",
+	"ADM1278",
+	"ADM1293",
+	"ADS7830",
+	"BMR490",
+	"DPS800",
+	"INA219",
+	"INA230",
+	"IPSPS",
+	"IR38060",
+	"IR38164",
+	"IR38263",
+	"ISL68137",
+	"ISL68220",
+	"ISL68223",
+	"ISL69225",
+	"ISL69243",
+	"ISL69260",
+	"LM25066",
+	"MAX16601",
+	"MAX20710",
+	"MAX20730",
+	"MAX20734",
+	"MAX20796",
+	"MAX34451",
+	"MP2971",
+	"MP2973",
+	"MP5023",
+	"PLI1209BC",
+	"pmbus",
+	"PXE1610",
+	"RAA228000",
+	"RAA228228",
+	"RAA228620",
+	"RAA229001",
+	"RAA229004",
+	"RAA229126",
+	"TPS53679",
+	"TPS546D24",
+	"XDPE11280",
+	"XDPE12284"
+};
+
+/// Retrieve an I2CDeviceType for the given device type string.
+pub fn get_device_type(s: &str) -> Option<I2CDeviceType> {
+	if let Some(k) = I2C_PMBUS_TYPES.get_key(s) {
+		Some(I2CDeviceType::PMBus(PMBusDeviceType { name: k }))
+	} else if let Some((k, v)) = I2C_HWMON_DEVICES.get_entry(s) {
+		Some(I2CDeviceType::Hwmon(HwmonDeviceType {
+			name: k,
+			creates_hwmon: *v,
+		}))
+	} else {
+		None
+	}
 }
 
-/// Newtype for an I2C device-type string.
-///
-/// This is the capitalized form used in the sensor config data.  (We downcase it on the
-/// fly before writing it into `new_device`.)
+/// A basic (non-pmbus) hwmon I2C device type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct I2CDeviceType(pub &'static str);
+pub struct HwmonDeviceType {
+	/// Device type name (uppercase).
+	name: &'static str,
+	/// Whether or not we expect the driver to create a `hwmon` subdirectory when
+	/// bound to a device.
+	creates_hwmon: bool,
+}
+
+/// A PMBus I2C device type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PMBusDeviceType {
+	/// Device type name (uppercase).
+	name: &'static str,
+}
+
+/// An enum for an I2C device type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum I2CDeviceType {
+	PMBus(PMBusDeviceType),
+	Hwmon(HwmonDeviceType),
+}
 
 impl I2CDeviceType {
+	/// Return the name of the device type.
+	pub fn name(&self) -> &'static str {
+		match self {
+			Self::PMBus(p) => p.name,
+			Self::Hwmon(h) => h.name,
+		}
+	}
+
+	/// Whether or not the device type is expected to create a `hwmon` subdirectory
+	/// when a driver is bound.
+	pub fn creates_hwmon(&self) -> bool {
+		match self {
+			// All PMBus devices are expected to, so we don't store it explicitly.
+			Self::PMBus(_) => true,
+			Self::Hwmon(h) => h.creates_hwmon,
+		}
+	}
+
 	/// Return the (lower-case) form of the string used to write into `new_device`.
 	fn kernel_type(&self) -> String {
-		self.0.to_lowercase()
+		self.name().to_lowercase()
 	}
 }
 
@@ -111,7 +204,7 @@ impl I2CDeviceParams {
 	/// bound to it.
 	pub fn device_present(&self) -> bool {
 		let mut path = PathBuf::from(&self.sysfs_device_dir());
-		if *I2C_HWMON_DEVICES.get(&self.devtype.0).unwrap_or(&true) {
+		if self.devtype.creates_hwmon() {
 			path.push("hwmon");
 		}
 		path.exists()
@@ -175,7 +268,7 @@ impl I2CDevice {
 		// Try to create it: 'echo $devtype $addr > .../i2c-$bus/new_device'
 		let ctor_path = Path::new(&dev.params.sysfs_bus_dir()).join("new_device");
 		let payload = format!("{} {:#02x}\n", dev.params.devtype.kernel_type(), dev.params.address);
-		eprintln!(">>> Instantiating {} at {}", dev.params.devtype.0, dev.params.sysfs_name());
+		eprintln!(">>> Instantiating {} at {}", dev.params.devtype.name(), dev.params.sysfs_name());
 		std::fs::write(&ctor_path, payload)?;
 
 		// Check if that created the requisite sysfs directory
@@ -192,7 +285,7 @@ impl I2CDevice {
 impl Drop for I2CDevice {
 	/// Deletes the I2C device represented by `self` by writing to `delete_device`.
 	fn drop(&mut self) {
-		eprintln!("<<< Deleting {} at {}", self.params.devtype.0, self.params.sysfs_name());
+		eprintln!("<<< Deleting {} at {}", self.params.devtype.name(), self.params.sysfs_name());
 		// No params.devicePresent() check on this like in
 		// I2CDevice::new(), since it might be used to clean up after a
 		// device instantiation that was only partially successful

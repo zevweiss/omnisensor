@@ -1,3 +1,5 @@
+//! Abstractions for managing I2C devices.
+
 use std::{
 	collections::HashMap,
 	path::{Path, PathBuf},
@@ -10,10 +12,15 @@ use crate::{
 	dbus_helpers::props::*,
 };
 
-// Functionally this could be simplified to a set (perhaps even with
-// membership implying false instead of true to keep it smaller), but
-// listing all known devices explicitly seems preferable
-// maintainability-wise.
+/// A map of supported I2C device types.
+///
+/// Keys are supported I2C device types (in capitalized dbus-config-data form, not the
+/// lowercase form used by the kernel) and whose values are `bool`s indicating whether or
+/// not the device is expected to create a `hwmon` directory when instantiated.
+///
+/// Functionally this could be simplified to a set (perhaps even with membership implying
+/// false instead of true to keep it smaller), but listing all known devices explicitly
+/// seems preferable maintainability-wise.
 static I2C_HWMON_DEVICES: phf::Map<&'static str, bool> = phf_map! {
 	"DPS310"   => false,
 	"EMC1412"  => true,
@@ -39,17 +46,24 @@ static I2C_HWMON_DEVICES: phf::Map<&'static str, bool> = phf_map! {
 	"W83773G"  => true,
 };
 
+/// The information needed to instantiate an I2C device.
 // FIXME: Clone on this is kind of ugly...
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct I2CDeviceParams {
+	/// I2C bus number.
 	pub bus: u16,
+	/// I2C address.
 	pub address: u16,
+	/// Device type, still in capitalized form.  (We downcase it
+	/// on the fly before writing it into `new_device`.)
 	pub devtype: String,
 }
 
+/// The sysfs directory into which all i2c devices are mapped.
 const I2C_DEV_DIR: &str = "/sys/bus/i2c/devices";
 
 impl I2CDeviceParams {
+	/// Create an [`I2CDeviceParams`] from a set of dbus properties and a type string.
 	pub fn from_dbus(cfg: &dbus::arg::PropMap, r#type: &str) -> ErrResult<Self> {
 		let bus: u64 = *prop_get_mandatory(cfg, "Bus")?;
 		let address: u64 = *prop_get_mandatory(cfg, "Address")?;
@@ -60,18 +74,24 @@ impl I2CDeviceParams {
 		})
 	}
 
+	/// Return the device name as employed in sysfs, e.g. `"2-004c"`.
 	pub fn sysfs_name(&self) -> String {
 		format!("{}-{:04x}", self.bus, self.address)
 	}
 
+	/// Return the absolute path of the sysfs directory representing the device.
 	pub fn sysfs_device_dir(&self) -> String {
 		format!("{}/{}", I2C_DEV_DIR, self.sysfs_name())
 	}
 
+	/// Return the absolute path of the sysfs directory representing the bus via which
+	/// the device is attached.
 	pub fn sysfs_bus_dir(&self) -> String {
 		format!("{}/i2c-{}", I2C_DEV_DIR, self.bus)
 	}
 
+	/// Test if the device is currently present, i.e. has had a driver successfully
+	/// bound to it.
 	pub fn device_present(&self) -> bool {
 		let mut path = PathBuf::from(&self.sysfs_device_dir());
 		if *I2C_HWMON_DEVICES.get(&self.devtype).unwrap_or(&true) {
@@ -80,6 +100,8 @@ impl I2CDeviceParams {
 		path.exists()
 	}
 
+	/// Test if the device is static, i.e. instantiated from a device-tree node (as
+	/// opposed to a dynamic device instantiate by userspace writing to `new_device`).
 	pub fn device_static(&self) -> bool {
 		if !self.device_present() {
 			false
@@ -88,6 +110,12 @@ impl I2CDeviceParams {
 		}
 	}
 
+	/// Attempt to instantiate the device represented by `self`, returning:
+	///
+	///  * `Ok(None)` if the device is static (we don't need to manage it).
+	///  * `Ok(Some(_))` on success (an [`I2CDevice`] that will remove the device when
+	///    the last reference to it is dropped).
+	///  * `Err(_)` on error.
 	pub fn instantiate_device(&self) -> ErrResult<Option<Arc<I2CDevice>>> {
 		if self.device_static() {
 			Ok(None)
@@ -109,11 +137,17 @@ impl I2CDeviceParams {
 	}
 }
 
+/// An instantiated I2C device.
+///
+/// Doesn't do much aside from acting as a token that keeps the device instantiated as
+/// long as it exists (its [`drop`](I2CDevice::drop) impl deletes the device).
 pub struct I2CDevice {
+	/// The parameters of the device we've instantiated.
 	pub params: I2CDeviceParams,
 }
 
 impl I2CDevice {
+	/// Instantiate an [`I2CDevice`] from an [`I2CDeviceParams`].
 	pub fn new(params: I2CDeviceParams) -> ErrResult<Self> {
 		// If it's already instantiated, there's nothing we need to do.
 		let dev = Self { params };
@@ -139,6 +173,7 @@ impl I2CDevice {
 }
 
 impl Drop for I2CDevice {
+	/// Deletes the I2C device represented by `self` by writing to `delete_device`.
 	fn drop(&mut self) {
 		eprintln!("<<< Deleting {} at {}", self.params.devtype, self.params.sysfs_name());
 		// No params.devicePresent() check on this like in
@@ -154,13 +189,17 @@ impl Drop for I2CDevice {
 	}
 }
 
-// Lookup table for finding I2CDevices.  Weak<_> because we only want
-// them kept alive by (strong, Arc<_>) references from Sensors so they
-// get dropped when the last sensor using them goes away.
+/// Lookup table for finding I2CDevices.  Weak<_> because we only want them kept alive by
+/// (strong, Arc<_>) references from Sensors so they get dropped when the last sensor
+/// using them goes away.
 pub type I2CDeviceMap = HashMap<I2CDeviceParams, std::sync::Weak<I2CDevice>>;
 
-// Find an existing I2CDevice in devmap for the given params, or
-// instantiate one and add it to devmap if not.
+/// Find an existing [`I2CDevice`] in `devmap` for the given `params`, or instantiate one
+/// and add it to `devmap` if not.  Returns:
+///
+///  * `Ok(Some(_))` if an existing device was found or a new one successfully instantiated.
+///  * `Ok(None)` if the device is static.
+///  * `Err(_)` on error.
 pub fn get_i2cdev(devmap: &mut I2CDeviceMap, params: &I2CDeviceParams) -> ErrResult<Option<Arc<I2CDevice>>> {
 	let d = devmap.get(params).and_then(|w| w.upgrade());
 	if d.is_some() {

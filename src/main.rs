@@ -55,9 +55,24 @@ const ENTITY_MANAGER_NAME: &str = "xyz.openbmc_project.EntityManager";
 
 /// Retrieve sensor config data from entity-manager via dbus.
 async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
-	let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, "/xyz/openbmc_project/inventory",
-				     Duration::from_secs(30), bus);
-	let objs = p.get_managed_objects().await?;
+	let get_objects = |path| async move {
+		let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, path,
+					     Duration::from_secs(30), bus);
+		p.get_managed_objects().await
+	};
+
+	// Try the new ObjectManager location first, but fall back to the old one in case that fails
+	let objs = match get_objects("/xyz/openbmc_project/inventory").await {
+		Ok(objs) => objs,
+		Err(e) => {
+			// ...but if both fail, return the error from the first one.
+			match get_objects("/").await {
+				Ok(objs) => objs,
+				Err(_) => return Err(e.into()),
+			}
+		},
+	};
+
 	let mut result = SensorConfigMap::new();
 
 	'objloop: for (path, submap) in objs.into_iter().map(|(p, s)| (InventoryPath(p.clone()), s)) {

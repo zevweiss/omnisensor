@@ -96,6 +96,17 @@ impl SensorType {
 			_ => None,
 		}
 	}
+
+	/// Return the hwmon type tag (filename prefix) for the sensor type.
+	pub fn hwmon_typetag(&self) -> &'static str {
+		match self {
+			Self::Temperature => "temp",
+			Self::RPM => "fan",
+			Self::Voltage => "in",
+			Self::Current => "curr",
+			Self::Power => "power",
+		}
+	}
 }
 
 /// An enum of config data all supported sensor types.

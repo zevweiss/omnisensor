@@ -11,13 +11,12 @@ use std::{
 use crate::{
 	DaemonState,
 	types::*,
-	gpio::{BridgeGPIOConfig, BridgeGPIO},
+	gpio::BridgeGPIOConfig,
 	powerstate::PowerState,
 	sensor,
 	sensor::{
 		Sensor,
 		SensorConfig,
-		SensorIOCtx,
 		SensorType,
 	},
 	sysfs,
@@ -96,16 +95,12 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			}
 		});
 	for adccfg in configs {
-		if !adccfg.power_state.active_now() {
-			continue;
-		}
-
-		let path = hwmondir.join(format!("in{}_input", adccfg.index + 1));
-		let file = match sysfs::HwmonFileInfo::from_abspath(path) {
-			Ok(f) => f,
+		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, adccfg.index, SensorType::Voltage,
+								     adccfg.power_state, &adccfg.bridge_gpio).await {
+			Ok(Some(ioctx)) => ioctx,
+			Ok(None) => continue,
 			Err(e) => {
-				eprintln!("{}: Error getting input file for index {}: {}", adccfg.name,
-					  adccfg.index, e);
+				eprintln!("Error preparing {} from {}: {}", adccfg.name, hwmondir.display(), e);
 				continue;
 			},
 		};
@@ -116,29 +111,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			continue;
 		};
 
-		let bridge_gpio = match &adccfg.bridge_gpio {
-			Some(c) => match BridgeGPIO::from_config(c.clone()) {
-				Ok(c) => Some(c),
-				Err(e) => {
-					eprintln!("Failed to get bridge GPIO {} for {}: {}", c.name,
-						  adccfg.name, e);
-					continue;
-				}
-			},
-			None => None,
-		};
-
-		let io = match sysfs::SysfsSensorIO::new(&file).await {
-			Ok(io) => io,
-			Err(e) => {
-				eprintln!("Failed to open {} for {}: {}",
-					  file.abspath.display(), adccfg.name, e);
-				continue;
-			},
-		};
-
-		let io = SensorIOCtx::new(io).with_bridge_gpio(bridge_gpio);
-		sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
+		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
 			Sensor::new(&adccfg.name, SensorType::Voltage, &daemonstate.sensor_intfs, &daemonstate.bus)
 				.with_poll_interval(adccfg.poll_interval)
 				.with_scale(adccfg.scale)

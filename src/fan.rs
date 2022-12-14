@@ -92,16 +92,12 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	let controller_dir = sysfs::get_single_glob_match(&pattern)?;
 	let hwmondir = sysfs::get_single_hwmon_dir(&controller_dir)?;
 	for fancfg in configs {
-		if !fancfg.power_state.active_now() {
-			continue;
-		}
-
-		let path = hwmondir.join(format!("fan{}_input", fancfg.index + 1));
-		let file = match sysfs::HwmonFileInfo::from_abspath(path) {
-			Ok(f) => f,
+		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, fancfg.index, SensorType::RPM,
+								     fancfg.power_state, &None).await {
+			Ok(Some(ioctx)) => ioctx,
+			Ok(None) => continue,
 			Err(e) => {
-				eprintln!("{}: Error getting input file for index {}: {}", fancfg.name,
-					  fancfg.index, e);
+				eprintln!("Error preparing {} from {}: {}", fancfg.name, hwmondir.display(), e);
 				continue;
 			},
 		};
@@ -112,17 +108,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			continue;
 		};
 
-		let io = match sysfs::SysfsSensorIO::new(&file).await {
-			Ok(io) => io,
-			Err(e) => {
-				eprintln!("Failed to open {} for {}: {}", file.abspath.display(),
-					  fancfg.name, e);
-				continue;
-			},
-		};
-
-		let io = SensorIOCtx::new(io);
-		sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
+		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
 			Sensor::new(&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus)
 				.with_power_state(fancfg.power_state)
 				.with_thresholds_from(&fancfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)

@@ -1,10 +1,16 @@
 //! Utility code for interacting with sysfs files.
 
-use std::path::{Path, PathBuf};
+use std::{
+	path::{Path, PathBuf},
+	sync::Arc,
+};
+
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::{
-	sensor::{SensorIO, SensorType},
+	gpio,
+	powerstate::PowerState,
+	sensor::{SensorIO, SensorIOCtx, SensorType},
 	types::*,
 };
 
@@ -153,6 +159,28 @@ pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>) -> ErrRes
 	info.sort_by_key(|info| (info.kind, info.idx));
 
 	Ok(info)
+}
+
+/// Construct a [`SensorIOCtx`] for an "indexed" hwmon sensor.
+///
+/// Indexed sensors are those with uniform numbered channels, such as ADC and fan sensors.
+///
+/// Returns `Ok(None)` if `power_state` is not currently active (in which case there's
+/// nothing further to do), and otherwise `Ok(Some(_))` on success or `Err(_)` on failure.
+pub async fn prepare_indexed_hwmon_ioctx(hwmondir: &Path, idx: u64, kind: SensorType, power_state: PowerState,
+					 bridge_gpio_cfg: &Option<Arc<gpio::BridgeGPIOConfig>>) -> ErrResult<Option<SensorIOCtx>> {
+	if !power_state.active_now() {
+		return Ok(None);
+	}
+
+	let path = hwmondir.join(format!("{}{}_input", kind.hwmon_typetag(), idx + 1));
+	let file = HwmonFileInfo::from_abspath(path)?;
+	let bridge_gpio = match bridge_gpio_cfg {
+		Some(c) => Some(gpio::BridgeGPIO::from_config(c.clone())?),
+		None => None,
+	};
+	let io = SysfsSensorIO::new(&file).await?;
+	Ok(Some(SensorIOCtx::new(io).with_bridge_gpio(bridge_gpio)))
 }
 
 /// Information for reading sensor data from sysfs.

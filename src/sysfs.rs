@@ -8,6 +8,8 @@ use crate::{
 	types::*,
 };
 
+pub const PLATFORM_DEVICE_DIR: &str = "/sys/bus/platform/devices";
+
 /// Read a bit of data from `fd` (at offset zero) and parse it as a `T`.
 ///
 /// (While not strictly required, the expectation is that `fd` refers to a sysfs file that

@@ -30,6 +30,9 @@ use crate::{
 #[cfg(feature = "adc")]
 use crate::adc;
 
+#[cfg(feature = "fan")]
+use crate::fan;
+
 #[cfg(feature = "peci")]
 use crate::peci;
 
@@ -102,6 +105,9 @@ pub enum SensorConfig {
 	#[cfg(feature = "adc")]
 	ADC(adc::ADCSensorConfig),
 
+	#[cfg(feature = "fan")]
+	Fan(fan::FanSensorConfig),
+
 	#[cfg(feature = "peci")]
 	PECI(peci::PECISensorConfig),
 }
@@ -127,6 +133,9 @@ impl SensorConfig {
 			"ADC" => adc::ADCSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::ADC),
 
 			"LM25066"|"W83773G"|"NCT6779" => hwmon::HwmonSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::Hwmon),
+
+			#[cfg(feature = "fan")]
+			"AspeedFan" => fan::FanSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::Fan),
 
 			#[cfg(feature = "peci")]
 			"XeonCPU" => peci::PECISensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::PECI),
@@ -642,6 +651,11 @@ pub async fn instantiate_all(cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<Senso
 	#[cfg(feature = "adc")]
 	adc::instantiate_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
 		eprintln!("Failed to instantiate ADC sensors: {}", e);
+	});
+
+	#[cfg(feature = "fan")]
+	fan::instantiate_sensors(&cfg, &mut sensors, filter, cr, conn, intfs).await.unwrap_or_else(|e| {
+		eprintln!("Failed to instantiate fan sensors: {}", e);
 	});
 
 	#[cfg(feature = "peci")]

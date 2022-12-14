@@ -27,6 +27,8 @@ mod types;
 mod sensor;
 #[cfg(feature = "adc")]
 mod adc;
+#[cfg(feature = "fan")]
+mod fan;
 mod hwmon;
 #[cfg(feature = "peci")]
 mod peci;

@@ -143,7 +143,7 @@ impl SensorConfig {
 			#[cfg(feature = "adc")]
 			"ADC" => adc::ADCSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::ADC),
 
-			"LM25066"|"W83773G"|"NCT6779" => hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon),
+			"LM25066"|"W83773G"|"NCT6779"|"pmbus" => hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon),
 
 			#[cfg(feature = "fan")]
 			"AspeedFan" => fan::FanSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Fan),

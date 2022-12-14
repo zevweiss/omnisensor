@@ -104,7 +104,7 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 		let file = match sysfs::HwmonFileInfo::from_abspath(path) {
 			Ok(f) => f,
 			Err(e) => {
-				eprintln!("{}: Error getting input file found for index {}: {}", adccfg.name,
+				eprintln!("{}: Error getting input file for index {}: {}", adccfg.name,
 					  adccfg.index, e);
 				continue;
 			},

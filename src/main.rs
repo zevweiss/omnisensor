@@ -111,8 +111,11 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 
 /// A helper function for handling dbus `PropertiesChanged` signals.
 async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
-			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, changed_paths: &Mutex<Option<HashSet<InventoryPath>>>,
-			   cr: &SyncMutex<dbus_crossroads::Crossroads>, msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
+			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
+			   msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
+	#[allow(non_upper_case_globals)]
+	static changed_paths: Mutex<Option<HashSet<InventoryPath>>> = Mutex::const_new(None);
+
 	let Some(path) = msg.path().map(|p| p.into_static()) else {
 		return;
 	};
@@ -215,11 +218,8 @@ async fn main() -> ErrResult<()> {
 
 	let _powersignals = powerstate::register_power_signal_handler(sysbus, powerhandler).await?;
 
-	#[allow(non_upper_case_globals)]
-	static changed_paths: Mutex<Option<HashSet<InventoryPath>>> = Mutex::const_new(None);
-
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
-		handle_propchange(sysbus, cfg, sensors, i2cdevs, &changed_paths, &cr, msg, sensor_intfs).await;
+		handle_propchange(sysbus, cfg, sensors, i2cdevs, &cr, msg, sensor_intfs).await;
 	};
 
 	let _propsignals = register_properties_changed_handler(sysbus, prophandler).await?;

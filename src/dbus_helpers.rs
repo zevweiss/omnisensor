@@ -21,7 +21,7 @@ pub struct SignalProp<A> {
 	conn: Arc<SyncConnection>,
 }
 
-impl<A: Copy + PartialEq + dbus::arg::RefArg> SignalProp<A> {
+impl<A: PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	/// Construct a [`SignalProp`] with the given members.
 	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
 		Self {
@@ -33,7 +33,9 @@ impl<A: Copy + PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	}
 
 	/// Retrieve `self`'s current value.
-	pub fn get(&self) -> A {
+	pub fn get(&self) -> A
+	where A: Copy
+	{
 		self.data
 	}
 
@@ -41,15 +43,16 @@ impl<A: Copy + PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	/// signal to dbus if `newdata` is unequal to `self.data`'s previous
 	/// value.
 	pub fn set(&mut self, newdata: A) {
-		let olddata = std::mem::replace(&mut self.data, newdata);
-		if newdata != olddata {
+		let changed = newdata != self.data;
+		self.data = newdata;
+		if changed {
 			self.send_propchg();
 		}
 	}
 
 	/// Emit a `PropertiesChanged` signal to dbus with `self`'s current value.
 	fn send_propchg(&self) {
-		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &dbus::arg::Variant(self.data)) {
+		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &dbus::arg::Variant(&self.data)) {
 			if self.conn.send(msg).is_err() {
 				eprintln!("Failed to send PropertiesChanged message for {:?}", self.dbuspath);
 			}

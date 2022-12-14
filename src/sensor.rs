@@ -268,6 +268,8 @@ pub struct Sensor {
 	available: SignalProp<bool>,
 	/// The dbus property that provides the sensor's functionality state.
 	functional: SignalProp<bool>,
+	/// The dbus property that provides the sensor's associations.
+	associations: SignalProp<Vec<(String, String, String)>>,
 
 	/// The sensor's running I/O task.
 	///
@@ -292,6 +294,7 @@ impl Sensor {
 		let maxvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
 		let available = SignalProp::new(false, &intfs.availability.msgfns.available, &dbuspath, conn);
 		let functional = SignalProp::new(true, &intfs.opstatus.msgfns.functional, &dbuspath, conn);
+		let associations = SignalProp::new(vec![], &intfs.assoc.msgfns.associations, &dbuspath, conn);
 
 		Self {
 			name: name.into(),
@@ -306,6 +309,7 @@ impl Sensor {
 			scale: 1.0,
 			available,
 			functional,
+			associations,
 
 			io: None,
 		}
@@ -468,6 +472,7 @@ impl Sensor {
 			sensor_intfs.value.token,
 			sensor_intfs.availability.token,
 			sensor_intfs.opstatus.token,
+			sensor_intfs.assoc.token,
 		];
 		for (threshold, intf) in self.thresholds.iter().zip(&sensor_intfs.thresholds) {
 			if threshold.is_some() {
@@ -610,6 +615,21 @@ fn build_opstatus_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<OpSta
 	})
 }
 
+/// The [`PropChgMsgFn`] for the `xyz.openbmc_project.Association.Definitions` interface.
+pub struct AssocIntfMsgFns {
+	pub associations: Arc<PropChgMsgFn>,
+}
+
+/// Construct the `xyz.openbmc_project.Association.Definitions` interface.
+pub fn build_assoc_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<AssocIntfMsgFns> {
+	build_sensor_intf(cr, "xyz.openbmc_project.Association.Definitions", |b| {
+		AssocIntfMsgFns {
+			associations: build_sensor_property(b, "Associations", |s| { s.associations.get_clone() }).into()
+		}
+	})
+}
+
+
 /// The aggregate of all the dbus interfaces for a sensor.
 pub struct SensorIntfData {
 	/// The `xyz.openbmc_project.Sensor.Value` interface.
@@ -621,6 +641,8 @@ pub struct SensorIntfData {
 	/// A per-severity-level array of `xyz.openbmc_project.Sensor.Threshold.$severity`
 	/// interfaces.
 	pub thresholds: threshold::ThresholdIntfDataArr,
+	/// The `xyz.openbmc_project.Association.Definitions` interface.
+	pub assoc: SensorIntf<AssocIntfMsgFns>,
 }
 
 /// Construct [`SensorIntfData`].
@@ -630,6 +652,7 @@ pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfDat
 		availability: build_availability_intf(cr),
 		opstatus: build_opstatus_intf(cr),
 		thresholds: threshold::build_sensor_threshold_intfs(cr),
+		assoc: build_assoc_intf(cr),
 	}
 }
 

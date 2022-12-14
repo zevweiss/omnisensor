@@ -39,6 +39,13 @@ impl<A: PartialEq + dbus::arg::RefArg> SignalProp<A> {
 		self.data
 	}
 
+	/// Retrieve a clone of `self`'s current value.
+	pub fn get_clone(&self) -> A
+	where A: Clone
+	{
+		self.data.clone()
+	}
+
 	/// Update `self`'s value to `newdata`, emitting a `PropertiesChanged`
 	/// signal to dbus if `newdata` is unequal to `self.data`'s previous
 	/// value.

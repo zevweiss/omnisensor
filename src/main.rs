@@ -202,8 +202,6 @@ async fn main() -> ErrResult<()> {
 		panic!("Lost connection to D-Bus: {}", err);
 	});
 
-	bus.request_name(DBUS_NAME, false, false, false).await?;
-
 	let mut cr = Crossroads::new();
 	cr.set_async_support(Some((bus.clone(), Box::new(|x| { tokio::spawn(x); }))));
 	cr.set_object_manager_support(Some(bus.clone()));
@@ -259,6 +257,8 @@ async fn main() -> ErrResult<()> {
 		cr.handle_message(msg, conn).expect("wtf?");
 		true
 	}));
+
+	daemonstate.bus.request_name(DBUS_NAME, false, false, false).await?;
 
 	println!("Hello, world!");
 

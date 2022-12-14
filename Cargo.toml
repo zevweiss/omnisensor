@@ -21,7 +21,8 @@ strum = "0.24"
 strum_macros = "0.24"
 
 [features]
-default = ["adc"]
+default = ["adc", "hostpower"]
 adc = []
 peci = []
 fan = []
+hostpower = []

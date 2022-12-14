@@ -39,6 +39,7 @@ mod sysfs;
 mod threshold;
 mod dbus_helpers;
 
+#[cfg(feature = "hostpower")]
 use powerstate::host_state;
 use types::*;
 use sensor::{
@@ -209,6 +210,7 @@ async fn main() -> ErrResult<()> {
 
 	let sensor_intfs = sensor::build_sensor_intfs(&mut cr);
 
+	#[cfg(feature = "hostpower")]
 	host_state::init_host_state(&bus).await;
 
 	let cfg = get_config(&bus).await?; // FIXME (error handling)
@@ -233,16 +235,18 @@ async fn main() -> ErrResult<()> {
 
 	sensor::instantiate_all(daemonstate, &FilterSet::All).await;
 
-	let powerhandler = move |_kind, newstate| async move {
-		if newstate {
-			sensor::instantiate_all(daemonstate, &FilterSet::All).await;
-		} else {
-			let mut sensors = daemonstate.sensors.lock().await;
-			sensor::deactivate(&mut sensors).await;
-		}
+	#[cfg(feature = "hostpower")]
+	let _powersignals = {
+		let powerhandler = move |_kind, newstate| async move {
+			if newstate {
+				sensor::instantiate_all(daemonstate, &FilterSet::All).await;
+			} else {
+				let mut sensors = daemonstate.sensors.lock().await;
+				sensor::deactivate(&mut sensors).await;
+			}
+		};
+		host_state::register_power_signal_handler(&daemonstate.bus, powerhandler).await?
 	};
-
-	let _powersignals = host_state::register_power_signal_handler(&daemonstate.bus, powerhandler).await?;
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
 		handle_propchange(daemonstate, msg).await;

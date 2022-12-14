@@ -1,15 +1,5 @@
 //! Utility code for sensor power-state attributes and host power state monitoring.
 
-use std::{
-	ops::DerefMut,
-	sync::Mutex as SyncMutex,
-};
-use dbus::{
-	message::MatchRule,
-	nonblock,
-	nonblock::stdintf::org_freedesktop_dbus::Properties,
-};
-
 use crate::types::*;
 
 /// Represents a setting of a sensor indicating in which host power states it is enabled.
@@ -28,13 +18,21 @@ pub enum PowerState {
 impl PowerState {
 	/// Test if a sensor whose power state is `self` should currently be enabled,
 	/// based on our tracking of the host's current power state.
+	///
+	/// If the `hostpower` feature is disabled, this behaves as if the host is always
+	/// (fully) powered off.
 	pub fn active_now(&self) -> bool {
-		let host = host_state::HOST_STATE.lock().unwrap();
-		match self {
-			Self::On => host.power_on,
-			Self::BiosPost => host.power_on && host.post_complete,
-			Self::Always => true,
-			Self::ChassisOn => host.chassis_on,
+		#[cfg(feature = "hostpower")] {
+			let host = host_state::HOST_STATE.lock().unwrap();
+			match self {
+				Self::On => host.power_on,
+				Self::BiosPost => host.power_on && host.post_complete,
+				Self::Always => true,
+				Self::ChassisOn => host.chassis_on,
+			}
+		}
+		#[cfg(not(feature = "hostpower"))] {
+			matches!(self, Self::Always)
 		}
 	}
 }
@@ -53,8 +51,20 @@ impl TryFrom<&String> for PowerState {
 }
 
 /// Host power state tracking code.
+#[cfg(feature = "hostpower")]
 pub mod host_state {
 	use super::*;
+
+	use std::{
+		ops::DerefMut,
+		sync::Mutex as SyncMutex,
+	};
+
+	use dbus::{
+		message::MatchRule,
+		nonblock,
+		nonblock::stdintf::org_freedesktop_dbus::Properties,
+	};
 
 	/// Represents various attributes of a host system's power state.
 	pub struct HostState {

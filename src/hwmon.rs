@@ -155,11 +155,11 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::Hwmon(hwmcfg) if dbuspaths.contains(path) => Some(hwmcfg),
+				SensorConfig::Hwmon(hwmcfg) if dbuspaths.contains(path) => Some((path, hwmcfg)),
 				_ => None,
 			}
 		});
-	for hwmcfg in configs {
+	for (path, hwmcfg) in configs {
 		let mainname = &hwmcfg.names[0];
 
 		if !hwmcfg.power_state.active_now() {
@@ -237,7 +237,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let io = SensorIOCtx::new(io).with_i2cdev(i2cdev.clone());
 
 			sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
-				Sensor::new(&sensorname, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
+				Sensor::new(path, &sensorname, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
 					.with_poll_interval(hwmcfg.poll_interval)
 					.with_power_state(hwmcfg.power_state)
 					.with_thresholds_from(&hwmcfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)

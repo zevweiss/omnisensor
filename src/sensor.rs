@@ -284,7 +284,7 @@ impl Sensor {
 	///
 	/// It will initially be disabled (no running I/O task); it can subsequently be
 	/// enabled by a call to its [`activate()`](Sensor::activate) method.
-	pub fn new(name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>) -> Self {
+	pub fn new(cfgpath: &InventoryPath, name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>) -> Self {
 		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 		let cleanname = name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
@@ -294,7 +294,20 @@ impl Sensor {
 		let maxvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
 		let available = SignalProp::new(false, &intfs.availability.msgfns.available, &dbuspath, conn);
 		let functional = SignalProp::new(true, &intfs.opstatus.msgfns.functional, &dbuspath, conn);
-		let associations = SignalProp::new(vec![], &intfs.assoc.msgfns.associations, &dbuspath, conn);
+
+		// dbus::strings::Path doesn't have a .parent() method, so momentarily
+		// pretend it's a filesystem path...
+		let parentpath = match std::path::Path::new(&*cfgpath.0).parent() {
+			Some(p) => p,
+			None => {
+				// Presumably unlikely to ever be hit, but I guess this
+				// seems slightly better than just calling .unwrap()...
+				eprintln!("Warning: bogus-looking config inventory path '{}', faking parent", cfgpath.0);
+				std::path::Path::new("/xyz/openbmc_project/inventory/system")
+			},
+		};
+		let assoc = ("chassis".to_string(), "all_sensors".to_string(), parentpath.to_string_lossy().into());
+		let associations = SignalProp::new(vec![assoc], &intfs.assoc.msgfns.associations, &dbuspath, conn);
 
 		Self {
 			name: name.into(),

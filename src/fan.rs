@@ -83,14 +83,14 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::Fan(fancfg) if dbuspaths.contains(path) => Some(fancfg),
+				SensorConfig::Fan(fancfg) if dbuspaths.contains(path) => Some((path, fancfg)),
 				_ => None,
 			}
 		});
 	let pattern = format!("{}/*.pwm-tacho-controller", sysfs::PLATFORM_DEVICE_DIR);
 	let controller_dir = sysfs::get_single_glob_match(&pattern)?;
 	let hwmondir = sysfs::get_single_hwmon_dir(&controller_dir)?;
-	for fancfg in configs {
+	for (path, fancfg) in configs {
 		let mut sensors = daemonstate.sensors.lock().await;
 
 		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, fancfg.name.clone()).await else {
@@ -108,7 +108,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		};
 
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
-			Sensor::new(&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus)
+			Sensor::new(path,&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus)
 				.with_power_state(fancfg.power_state)
 				.with_thresholds_from(&fancfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 				.with_minval(fancfg.minreading)

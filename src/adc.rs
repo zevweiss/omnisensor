@@ -90,11 +90,11 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::ADC(adccfg) if dbuspaths.contains(path) => Some(adccfg),
+				SensorConfig::ADC(adccfg) if dbuspaths.contains(path) => Some((path, adccfg)),
 				_ => None,
 			}
 		});
-	for adccfg in configs {
+	for (path, adccfg) in configs {
 		let mut sensors = daemonstate.sensors.lock().await;
 
 		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, adccfg.name.clone()).await else {
@@ -112,7 +112,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		};
 
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
-			Sensor::new(&adccfg.name, SensorType::Voltage, &daemonstate.sensor_intfs, &daemonstate.bus)
+			Sensor::new(path, &adccfg.name, SensorType::Voltage, &daemonstate.sensor_intfs, &daemonstate.bus)
 				.with_poll_interval(adccfg.poll_interval)
 				.with_scale(adccfg.scale)
 				.with_power_state(adccfg.power_state)

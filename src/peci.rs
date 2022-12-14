@@ -102,7 +102,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::PECI(pecicfg) if dbuspaths.contains(path) => Some(pecicfg),
+				SensorConfig::PECI(pecicfg) if dbuspaths.contains(path) => Some((path, pecicfg)),
 				_ => None,
 			}
 		});
@@ -114,7 +114,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		eprintln!("Warning: PECI rescan failed: {}", e);
 	}
 
-	for pecicfg in configs {
+	for (path, pecicfg) in configs {
 		// Bleh...the only thing we don't know in advance here is the
 		// CPU family (hsx, skx, icx, etc.) matched by the '*'.  Is
 		// there some better way of finding this path?
@@ -171,7 +171,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let io = SensorIOCtx::new(io);
 
 			sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
-				Sensor::new(&name, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
+				Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
 					.with_power_state(PowerState::On) // FIXME: make configurable?
 					.with_thresholds_from(&pecicfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 					.with_minval(-128.0)

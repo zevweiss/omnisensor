@@ -5,7 +5,7 @@
 //! (units, thresholds, operational status, etc.) via dbus.
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::HashSet,
 	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
@@ -109,10 +109,24 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 	Ok(signal)
 }
 
+/// Global daemon-wide state
+pub struct DaemonState {
+	/// Our collected, parsed (structured) sensor config data.
+	config: Mutex<SensorConfigMap>,
+	/// All extant sensors, by name (active and inactive alike).
+	sensors: Mutex<SensorMap>,
+	/// All managed (dynamic) I2C devices.
+	i2cdevs: Mutex<i2c::I2CDeviceMap>,
+	/// Our dbus connection.
+	bus: Arc<SyncConnection>,
+	/// dbus object server registry...thing.
+	crossroads: SyncMutex<dbus_crossroads::Crossroads>,
+	/// Sensor dbus interface metadata.
+	sensor_intfs: SensorIntfData,
+}
+
 /// A helper function for handling dbus `PropertiesChanged` signals.
-async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMap>, sensors: &Mutex<SensorMap>,
-			   i2cdevs: &Mutex<i2c::I2CDeviceMap>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-			   msg: dbus::message::Message, sensor_intfs: &SensorIntfData) {
+async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Message) {
 	#[allow(non_upper_case_globals)]
 	static changed_paths: Mutex<Option<HashSet<InventoryPath>>> = Mutex::const_new(None);
 
@@ -147,7 +161,7 @@ async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMa
 		return;
 	};
 
-	let newcfg = match get_config(bus).await {
+	let newcfg = match get_config(&daemonstate.bus).await {
 		Ok(c) => c,
 		Err(e) => {
 			eprintln!("Failed to retrieve sensor configs, ignoring PropertiesChanged: {}", e);
@@ -156,76 +170,72 @@ async fn handle_propchange(bus: &Arc<SyncConnection>, cfg: &Mutex<SensorConfigMa
 	};
 
 	{
-		*cfg.lock().await = newcfg;
+		*daemonstate.config.lock().await = newcfg;
 	}
 
-	sensor::instantiate_all(cfg, sensors, &filter, i2cdevs, cr, bus, sensor_intfs).await;
+	sensor::instantiate_all(daemonstate, &filter).await;
 }
 
 /// The entry point of the daemon.
 #[tokio::main]
 async fn main() -> ErrResult<()> {
-	let (sysbus_resource, sysbus) = connection::new_system_sync()?;
+	let (bus_resource, bus) = connection::new_system_sync()?;
 	let _handle = tokio::spawn(async {
-		let err = sysbus_resource.await;
+		let err = bus_resource.await;
 		panic!("Lost connection to D-Bus: {}", err);
 	});
 
-	// HACK: this is effectively a global; leak it so we can
-	// borrow from it for other things that are leaked later on
-	// (see below)
-	let sysbus: &_ = Box::leak(Box::new(sysbus));
+	bus.request_name(DBUS_NAME, false, false, false).await?;
 
-	sysbus.request_name(DBUS_NAME, false, false, false).await?;
+	let mut cr = Crossroads::new();
+	cr.set_async_support(Some((bus.clone(), Box::new(|x| { tokio::spawn(x); }))));
+	cr.set_object_manager_support(Some(bus.clone()));
 
-	fn globalize<T>(x: T) -> &'static Mutex<T> {
-		Box::leak(Box::new(Mutex::new(x)))
-	}
+	let sensor_intfs = sensor::build_sensor_intfs(&mut cr);
 
-	let cr: &_ = Box::leak(Box::new(SyncMutex::new(Crossroads::new())));
-	let mut crlock = cr.lock().unwrap();
-	crlock.set_async_support(Some((sysbus.clone(), Box::new(|x| { tokio::spawn(x); }))));
-	crlock.set_object_manager_support(Some(sysbus.clone()));
+	powerstate::init_host_state(&bus).await;
 
-	let sensor_intfs: &_ = Box::leak(Box::new(sensor::build_sensor_intfs(&mut crlock)));
+	let cfg = get_config(&bus).await?; // FIXME (error handling)
 
-	powerstate::init_host_state(sysbus).await;
+	cr.insert("/xyz", &[], ());
+	cr.insert("/xyz/openbmc_project", &[], ());
+	let objmgr = cr.object_manager();
+	cr.insert("/xyz/openbmc_project/sensors", &[objmgr], ());
 
-	// HACK: leak things into a pseudo-globals (to satisfy
-	// callback lifetime requirements).  Once const HashMap::new()
-	// is stable we can switch these to be real globals instead.
-	let sensors = globalize(HashMap::new());
-	let i2cdevs = globalize(i2c::I2CDeviceMap::new());
-	let cfg = globalize(get_config(sysbus).await?); // FIXME (error handling)
+	let daemonstate = DaemonState {
+		config: Mutex::new(cfg),
+		sensors: Mutex::new(SensorMap::new()),
+		i2cdevs: Mutex::new(i2c::I2CDeviceMap::new()),
+		bus,
+		crossroads: SyncMutex::new(cr),
+		sensor_intfs,
+	};
 
-	crlock.insert("/xyz", &[], ());
-	crlock.insert("/xyz/openbmc_project", &[], ());
-	let objmgr = crlock.object_manager();
-	crlock.insert("/xyz/openbmc_project/sensors", &[objmgr], ());
+	// HACK: leak this into a pseudo-global to satisfy callback lifetime requirements
+	// (Arc-ing it would be sort of silly; its lifetime is the program's lifetime).
+	let daemonstate: &_ = Box::leak(Box::new(daemonstate));
 
-	drop(crlock);
-
-	sensor::instantiate_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
+	sensor::instantiate_all(&daemonstate, &FilterSet::All).await;
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {
-			sensor::instantiate_all(cfg, sensors, &FilterSet::All, i2cdevs, &cr, sysbus, sensor_intfs).await;
+			sensor::instantiate_all(daemonstate, &FilterSet::All).await;
 		} else {
-			let mut sensors = sensors.lock().await;
+			let mut sensors = daemonstate.sensors.lock().await;
 			sensor::deactivate(&mut sensors).await;
 		}
 	};
 
-	let _powersignals = powerstate::register_power_signal_handler(sysbus, powerhandler).await?;
+	let _powersignals = powerstate::register_power_signal_handler(&daemonstate.bus, powerhandler).await?;
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
-		handle_propchange(sysbus, cfg, sensors, i2cdevs, &cr, msg, sensor_intfs).await;
+		handle_propchange(daemonstate, msg).await;
 	};
 
-	let _propsignals = register_properties_changed_handler(sysbus, prophandler).await?;
+	let _propsignals = register_properties_changed_handler(&daemonstate.bus, prophandler).await?;
 
-	sysbus.start_receive(MatchRule::new_method_call(), Box::new(move |msg, conn| {
-		let mut cr = cr.lock().unwrap();
+	daemonstate.bus.start_receive(MatchRule::new_method_call(), Box::new(move |msg, conn| {
+		let mut cr = daemonstate.crossroads.lock().unwrap();
 		cr.handle_message(msg, conn).expect("wtf?");
 		true
 	}));

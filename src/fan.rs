@@ -2,26 +2,17 @@
 //!
 //! A la dbus-sensors's `fansensor` daemon.
 
-use std::{
-	collections::HashMap,
-	sync::{Arc, Mutex as SyncMutex},
-};
-
-use dbus::{
-	nonblock::SyncConnection,
-};
+use std::collections::HashMap;
 
 use crate::{
+	DaemonState,
 	dbus_helpers::props::*,
 	powerstate::PowerState,
 	sensor,
 	sensor::{
 		Sensor,
 		SensorConfig,
-		SensorConfigMap,
-		SensorIntfData,
 		SensorIOCtx,
-		SensorMap,
 		SensorType,
 	},
 	sysfs,
@@ -88,9 +79,8 @@ impl FanSensorConfig {
 }
 
 /// Instantiate any active fan sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
-				 dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-				 conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) ->ErrResult<()> {
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) ->ErrResult<()> {
+	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -116,7 +106,9 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 			},
 		};
 
-		let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, fancfg.name.clone()).await else {
+		let mut sensors = daemonstate.sensors.lock().await;
+
+		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, fancfg.name.clone()).await else {
 			continue;
 		};
 
@@ -130,10 +122,10 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 		};
 
 		let io = SensorIOCtx::new(io);
-		sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
-			Sensor::new(&fancfg.name, SensorType::RPM, sensor_intfs, conn)
+		sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
+			Sensor::new(&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus)
 				.with_power_state(fancfg.power_state)
-				.with_thresholds_from(&fancfg.thresholds, &sensor_intfs.thresholds, conn)
+				.with_thresholds_from(&fancfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 				.with_minval(fancfg.minreading)
 				.with_maxval(fancfg.maxreading)
 		}).await;

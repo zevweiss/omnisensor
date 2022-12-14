@@ -5,19 +5,15 @@
 
 use std::{
 	collections::{HashMap, HashSet},
-	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
-use dbus::{
-	arg::RefArg,
-	nonblock::SyncConnection,
-};
+use dbus::arg::RefArg;
 
 use crate::{
+	DaemonState,
 	types::*,
 	i2c::{
 		I2CDeviceParams,
-		I2CDeviceMap,
 		I2CDeviceType,
 		get_device_type,
 		get_i2cdev,
@@ -27,10 +23,7 @@ use crate::{
 	sensor::{
 		Sensor,
 		SensorConfig,
-		SensorConfigMap,
-		SensorIntfData,
 		SensorIOCtx,
-		SensorMap,
 		SensorType,
 	},
 	sysfs,
@@ -157,11 +150,9 @@ fn name_for_label(label: &str) -> &str {
 }
 
 /// Instantiate any active PMBus/I2C hwmon sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
-				 dbuspaths: &FilterSet<InventoryPath>, i2cdevs: &mut I2CDeviceMap,
-				 cr: &SyncMutex<dbus_crossroads::Crossroads>, sensor_intfs: &SensorIntfData,
-				 conn: &Arc<SyncConnection>) ->ErrResult<()> {
-	let configs = cfg.iter()
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) ->ErrResult<()> {
+	let cfgmap = daemonstate.config.lock().await;
+	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
 				SensorConfig::Hwmon(hwmcfg) if dbuspaths.contains(path) => Some(hwmcfg),
@@ -177,12 +168,15 @@ pub async fn instantiate_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 			continue;
 		}
 
-		let i2cdev = match get_i2cdev(i2cdevs, &hwmcfg.i2c) {
-			Ok(d) => d,
-			Err(e) => {
-				eprintln!("{}: i2c device instantiation failed, skipping: {}", mainname, e);
-				continue;
-			},
+		let i2cdev = {
+			let mut i2cdevs = daemonstate.i2cdevs.lock().await;
+			match get_i2cdev(&mut i2cdevs, &hwmcfg.i2c) {
+				Ok(d) => d,
+				Err(e) => {
+					eprintln!("{}: i2c device instantiation failed, skipping: {}", mainname, e);
+					continue;
+				},
+			}
 		};
 
 		let prefix = match hwmcfg.i2c.devtype {
@@ -218,7 +212,9 @@ pub async fn instantiate_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 				continue;
 			};
 
-			let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, sensorname.clone()).await else {
+			let mut sensors = daemonstate.sensors.lock().await;
+
+			let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, sensorname.clone()).await else {
 				continue;
 			};
 
@@ -240,11 +236,11 @@ pub async fn instantiate_sensors(cfg: &SensorConfigMap, sensors: &mut SensorMap,
 
 			let io = SensorIOCtx::new(io).with_i2cdev(i2cdev.clone());
 
-			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
-				Sensor::new(&sensorname, file.kind, sensor_intfs, conn)
+			sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
+				Sensor::new(&sensorname, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
 					.with_poll_interval(hwmcfg.poll_interval)
 					.with_power_state(hwmcfg.power_state)
-					.with_thresholds_from(&hwmcfg.thresholds, &sensor_intfs.thresholds, conn)
+					.with_thresholds_from(&hwmcfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 					.with_minval(minval)
 					.with_maxval(maxval)
 			}).await;

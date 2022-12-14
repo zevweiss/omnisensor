@@ -4,12 +4,12 @@
 
 use std::{
 	collections::HashMap,
-	sync::{Arc, Mutex as SyncMutex},
+	sync::Arc,
 	time::Duration,
 };
-use dbus::nonblock::SyncConnection;
 
 use crate::{
+	DaemonState,
 	types::*,
 	gpio::{BridgeGPIOConfig, BridgeGPIO},
 	powerstate::PowerState,
@@ -17,10 +17,7 @@ use crate::{
 	sensor::{
 		Sensor,
 		SensorConfig,
-		SensorConfigMap,
-		SensorIntfData,
 		SensorIOCtx,
-		SensorMap,
 		SensorType,
 	},
 	sysfs,
@@ -88,10 +85,9 @@ impl ADCSensorConfig {
 const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
 /// Instantiate any active ADC sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
-				 dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-				 conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) -> ErrResult<()> {
 	let hwmondir = sysfs::get_single_hwmon_dir(std::path::Path::new(IIO_HWMON_PATH))?;
+	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -100,6 +96,10 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 			}
 		});
 	for adccfg in configs {
+		if !adccfg.power_state.active_now() {
+			continue;
+		}
+
 		let path = hwmondir.join(format!("in{}_input", adccfg.index + 1));
 		let file = match sysfs::HwmonFileInfo::from_abspath(path) {
 			Ok(f) => f,
@@ -110,13 +110,9 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 			},
 		};
 
-		if !adccfg.power_state.active_now() {
-			// FIXME: log noise
-			eprintln!("{}: not active, skipping...", adccfg.name);
-			continue;
-		}
+		let mut sensors = daemonstate.sensors.lock().await;
 
-		let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, adccfg.name.clone()).await else {
+		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, adccfg.name.clone()).await else {
 			continue;
 		};
 
@@ -142,12 +138,12 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 		};
 
 		let io = SensorIOCtx::new(io).with_bridge_gpio(bridge_gpio);
-		sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
-			Sensor::new(&adccfg.name, SensorType::Voltage, sensor_intfs, conn)
+		sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
+			Sensor::new(&adccfg.name, SensorType::Voltage, &daemonstate.sensor_intfs, &daemonstate.bus)
 				.with_poll_interval(adccfg.poll_interval)
 				.with_scale(adccfg.scale)
 				.with_power_state(adccfg.power_state)
-				.with_thresholds_from(&adccfg.thresholds, &sensor_intfs.thresholds, conn)
+				.with_thresholds_from(&adccfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 				.with_minval(0.0)
 				.with_maxval(1.8 * adccfg.scale) // 1.8 cargo-culted from ADCSensorMain.cpp
 		}).await;

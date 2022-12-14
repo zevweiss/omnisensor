@@ -5,21 +5,16 @@
 use std::{
 	collections::HashMap,
 	path::Path,
-	sync::{Arc, Mutex as SyncMutex},
 };
 
-use dbus::nonblock::SyncConnection;
-
 use crate::{
+	DaemonState,
 	powerstate::PowerState,
 	sensor,
 	sensor::{
 		Sensor,
 		SensorConfig,
-		SensorConfigMap,
-		SensorIntfData,
 		SensorIOCtx,
-		SensorMap,
 	},
 	threshold,
 	sysfs,
@@ -102,9 +97,8 @@ impl PECISensorConfig {
 }
 
 /// Instantiate any active PECI sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorMap,
-				 dbuspaths: &FilterSet<InventoryPath>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-				 conn: &Arc<SyncConnection>, sensor_intfs: &SensorIntfData) -> ErrResult<()> {
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) -> ErrResult<()> {
+	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
@@ -160,7 +154,9 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 
 			let name = format!("{} {}", label, pecicfg.name);
 
-			let Some(entry) = sensor::get_nonactive_sensor_entry(sensors, name.clone()).await else {
+			let mut sensors = daemonstate.sensors.lock().await;
+
+			let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, name.clone()).await else {
 				continue;
 			};
 
@@ -174,10 +170,10 @@ pub async fn instantiate_sensors(cfgmap: &SensorConfigMap, sensors: &mut SensorM
 
 			let io = SensorIOCtx::new(io);
 
-			sensor::install_or_activate(entry, cr, io, sensor_intfs, || {
-				Sensor::new(&name, file.kind, sensor_intfs, conn)
+			sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
+				Sensor::new(&name, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
 					.with_power_state(PowerState::On) // FIXME: make configurable?
-					.with_thresholds_from(&pecicfg.thresholds, &sensor_intfs.thresholds, conn)
+					.with_thresholds_from(&pecicfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 					.with_minval(-128.0)
 					.with_maxval(127.0)
 			}).await;

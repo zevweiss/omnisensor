@@ -39,7 +39,7 @@ pub async fn read_and_parse<T: std::str::FromStr>(fd: &mut tokio::fs::File) -> E
 ///
 /// Returns Ok(_) if so, and Err(_) on multiple matches, no matches, or other errors.
 pub fn get_single_glob_match(pattern: &str) -> ErrResult<PathBuf> {
-	let mut matches = glob::glob(&pattern)?;
+	let mut matches = glob::glob(pattern)?;
 	let first = match matches.next() {
 		Some(m) => m?,
 		None => return Err(err_not_found("no match found")),

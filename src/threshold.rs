@@ -229,7 +229,7 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &T
 			.try_into() else {
 				panic!("ThresholdBoundType::iter() produced wrong number of elements?");
 			};
-		let threshold = thresholds[cfg.severity as usize].get_or_insert_with(|| Threshold { bounds });
+		let threshold = thresholds[cfg.severity as usize].get_or_insert(Threshold { bounds });
 
 		let bound = &mut threshold.bounds[cfg.kind as usize];
 

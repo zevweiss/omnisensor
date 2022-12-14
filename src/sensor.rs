@@ -141,15 +141,15 @@ impl SensorConfig {
 
 		let res = match cfgtype {
 			#[cfg(feature = "adc")]
-			"ADC" => adc::ADCSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::ADC),
+			"ADC" => adc::ADCSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::ADC),
 
-			"LM25066"|"W83773G"|"NCT6779" => hwmon::HwmonSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::Hwmon),
+			"LM25066"|"W83773G"|"NCT6779" => hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon),
 
 			#[cfg(feature = "fan")]
-			"AspeedFan" => fan::FanSensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::Fan),
+			"AspeedFan" => fan::FanSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Fan),
 
 			#[cfg(feature = "peci")]
-			"XeonCPU" => peci::PECISensorConfig::from_dbus(props, intf, &all_intfs).map(SensorConfig::PECI),
+			"XeonCPU" => peci::PECISensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::PECI),
 
 			_ => {
 				println!("\t{}:", intf);
@@ -390,7 +390,7 @@ impl Sensor {
 		// Use a weak reference in the update task closure so it doesn't hold a
 		// strong reference to the sensor (which would create a reference loop via
 		// s.update_task and make it un-droppable)
-		let weakref = Arc::downgrade(&sensor);
+		let weakref = Arc::downgrade(sensor);
 
 		let update_loop = async move {
 			let mut poll_interval = poll_interval;

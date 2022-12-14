@@ -218,7 +218,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				continue;
 			};
 
-			let io = match sysfs::SysfsSensorIO::new(&file).await {
+			let io = match sysfs::SysfsSensorIO::new(file).await {
 				Ok(io) => io,
 				Err(e) => {
 					eprintln!("{}: skipping {}: {}", sensorname, file.abspath.display(), e);

@@ -12,7 +12,6 @@ use crate::{
 	sensor::{
 		Sensor,
 		SensorConfig,
-		SensorIOCtx,
 		SensorType,
 	},
 	sysfs,

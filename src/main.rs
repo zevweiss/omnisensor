@@ -215,7 +215,7 @@ async fn main() -> ErrResult<()> {
 	// (Arc-ing it would be sort of silly; its lifetime is the program's lifetime).
 	let daemonstate: &_ = Box::leak(Box::new(daemonstate));
 
-	sensor::instantiate_all(&daemonstate, &FilterSet::All).await;
+	sensor::instantiate_all(daemonstate, &FilterSet::All).await;
 
 	let powerhandler = move |_kind, newstate| async move {
 		if newstate {

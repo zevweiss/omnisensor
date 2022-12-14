@@ -63,7 +63,7 @@ impl SensorType {
 	pub fn dbus_category(&self) -> &'static str {
 		match self {
 			Self::Temperature => "temperature",
-			Self::RPM => "fanpwm",
+			Self::RPM => "fan_tach",
 			Self::Voltage => "voltage",
 			Self::Current => "current",
 			Self::Power => "power",

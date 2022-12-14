@@ -531,7 +531,7 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 /// The properties of the interface are constructed by calling `mkprops()`, which returns
 /// a struct of [`PropChgMsgFn`]s (e.g. [`ValueIntfMsgFns`]), which are returned in
 /// combination with the [`token`](dbus_crossroads::IfaceToken) created for the interface.
-pub fn build_intf<T, F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> SensorIntf<T>
+pub fn build_sensor_intf<T, F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> SensorIntf<T>
 	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
 {
 	let mut msgfns: Option<T> = None;
@@ -574,7 +574,7 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 
 /// Construct the `xyz.openbmc_project.Sensor.Value` interface.
 fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<ValueIntfMsgFns> {
-	build_intf(cr, "xyz.openbmc_project.Sensor.Value", |b| {
+	build_sensor_intf(cr, "xyz.openbmc_project.Sensor.Value", |b| {
 		ValueIntfMsgFns {
 			unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
 			value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
@@ -592,7 +592,7 @@ pub struct AvailabilityIntfMsgFns {
 
 /// Construct the `xyz.openbmc_project.State.Decorator.Availability` interface.
 fn build_availability_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<AvailabilityIntfMsgFns> {
-	build_intf(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
+	build_sensor_intf(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
 		AvailabilityIntfMsgFns {
 			available: build_sensor_property(b, "Available", |s| s.available.get()).into(),
 		}
@@ -607,7 +607,7 @@ pub struct OpStatusIntfMsgFns {
 
 /// Construct the `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
 fn build_opstatus_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<OpStatusIntfMsgFns> {
-	build_intf(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
+	build_sensor_intf(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
 		OpStatusIntfMsgFns {
 			functional: build_sensor_property(b, "Functional", |s| s.functional.get()).into(),
 		}

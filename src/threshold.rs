@@ -15,7 +15,7 @@ use strum::{EnumCount as _EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 
 use crate::{
-	sensor::{build_intf, Sensor},
+	sensor::{build_sensor_intf, Sensor},
 	types::*,
 	dbus_helpers::{
 		props::*,
@@ -309,7 +309,7 @@ fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: Thr
 
 /// Construct a threshold interface for the given severity `sev`.
 fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<ThresholdIntfMsgFns> {
-	build_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
+	build_sensor_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
 		let Ok(bounds) = ThresholdBoundType::iter()
 			.map(|t| build_threshold_bound_intf(b, sev, t))
 			.collect::<Vec<_>>()

@@ -91,6 +91,12 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	let controller_dir = sysfs::get_single_glob_match(&pattern)?;
 	let hwmondir = sysfs::get_single_hwmon_dir(&controller_dir)?;
 	for fancfg in configs {
+		let mut sensors = daemonstate.sensors.lock().await;
+
+		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, fancfg.name.clone()).await else {
+			continue;
+		};
+
 		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, fancfg.index, SensorType::RPM,
 								     fancfg.power_state, &None).await {
 			Ok(Some(ioctx)) => ioctx,
@@ -99,12 +105,6 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				eprintln!("Error preparing {} from {}: {}", fancfg.name, hwmondir.display(), e);
 				continue;
 			},
-		};
-
-		let mut sensors = daemonstate.sensors.lock().await;
-
-		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, fancfg.name.clone()).await else {
-			continue;
 		};
 
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {

@@ -95,6 +95,12 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			}
 		});
 	for adccfg in configs {
+		let mut sensors = daemonstate.sensors.lock().await;
+
+		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, adccfg.name.clone()).await else {
+			continue;
+		};
+
 		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, adccfg.index, SensorType::Voltage,
 								     adccfg.power_state, &adccfg.bridge_gpio).await {
 			Ok(Some(ioctx)) => ioctx,
@@ -103,12 +109,6 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				eprintln!("Error preparing {} from {}: {}", adccfg.name, hwmondir.display(), e);
 				continue;
 			},
-		};
-
-		let mut sensors = daemonstate.sensors.lock().await;
-
-		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, adccfg.name.clone()).await else {
-			continue;
 		};
 
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {

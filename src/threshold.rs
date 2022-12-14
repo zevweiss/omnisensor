@@ -86,11 +86,11 @@ impl ThresholdBoundType {
 	}
 }
 
-impl TryFrom<&str> for ThresholdBoundType {
+impl TryFrom<&String> for ThresholdBoundType {
 	type Error = Box<dyn std::error::Error>;
 	/// Construct a [`ThresholdBoundType`] from its dbus string representation.
-	fn try_from(s: &str) -> ErrResult<Self> {
-		match s {
+	fn try_from(s: &String) -> ErrResult<Self> {
+		match s.as_str() {
 			"less than" => Ok(Self::Lower),
 			"greater than" => Ok(Self::Upper),
 			_ => Err(err_invalid_data("Threshold Direction must be \"less than\" or \"greater than\"")),
@@ -117,8 +117,8 @@ pub struct ThresholdConfig {
 impl ThresholdConfig {
 	/// Construct a [`ThresholdConfig`] from a set of dbus properties.
 	fn from_dbus(props: &dbus::arg::PropMap) -> ErrResult<Self> {
-		let kind = prop_get_mandatory_from::<str, _>(props, "Direction")?;
-		let severity = prop_get_mandatory_from::<f64, _>(props, "Severity")?;
+		let kind = prop_get_mandatory_from(props, "Direction")?;
+		let severity = prop_get_mandatory_from(props, "Severity")?;
 		let value = *prop_get_mandatory::<f64>(props, "Value")?;
 		let hysteresis = *prop_get_default::<f64>(props, "Hysteresis", &f64::NAN)?;
 

@@ -59,7 +59,7 @@ impl HwmonSensorConfig {
 		let r#type = prop_get_mandatory::<String>(basecfg, "Type")?.clone();
 		let poll_sec: u64 = *prop_get_default(basecfg, "PollRate", &1u64)?;
 		let poll_interval = Duration::from_secs(poll_sec);
-		let power_state = prop_get_default_from::<str, _>(basecfg, "PowerState", PowerState::Always)?;
+		let power_state = prop_get_default_from(basecfg, "PowerState", PowerState::Always)?;
 		let mut names = vec![name.clone()];
 		for i in 1.. {
 			let key = format!("Name{}", i);

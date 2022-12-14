@@ -14,10 +14,10 @@ enum Polarity {
 	ActiveLow,
 }
 
-impl TryFrom<&str> for Polarity {
+impl TryFrom<&String> for Polarity {
 	type Error = Box<dyn std::error::Error>;
-	fn try_from(s: &str) -> ErrResult<Self> {
-		match s {
+	fn try_from(s: &String) -> ErrResult<Self> {
+		match s.as_ref() {
 			"High" => Ok(Self::ActiveHigh),
 			"Low" => Ok(Self::ActiveLow),
 			_ => Err(err_invalid_data("Polarity must be \"High\" or \"Low\"")),
@@ -43,7 +43,7 @@ impl BridgeGPIOConfig {
 	pub fn from_dbus(cfg: &dbus::arg::PropMap) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(cfg, "Name")?;
 		let setup_sec: f64 = *prop_get_default(cfg, "SetupTime", &0.0f64)?;
-		let polarity = prop_get_default_from::<str, _>(cfg, "Polarity", Polarity::ActiveHigh)?;
+		let polarity = prop_get_default_from(cfg, "Polarity", Polarity::ActiveHigh)?;
 		Ok(Self {
 			name: name.clone(),
 			setup_time: Duration::from_secs_f64(setup_sec),

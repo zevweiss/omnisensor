@@ -39,10 +39,10 @@ impl PowerState {
 	}
 }
 
-impl TryFrom<&str> for PowerState {
+impl TryFrom<&String> for PowerState {
 	type Error = Box<dyn std::error::Error>;
-	fn try_from(s: &str) -> ErrResult<Self> {
-		match s {
+	fn try_from(s: &String) -> ErrResult<Self> {
+		match s.as_ref() {
 			"Always" => Ok(Self::Always),
 			"On" => Ok(Self::On),
 			"BiosPost" => Ok(Self::BiosPost),

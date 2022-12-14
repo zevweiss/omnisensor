@@ -79,7 +79,7 @@ pub mod props {
 		let Some(value) = map.get(key) else {
 			return Ok(None);
 		};
-		let v = dbus::arg::cast::<T>(value);
+		let v = dbus::arg::cast::<T>(&value.0);
 		if v.is_some() {
 			Ok(v)
 		} else {
@@ -112,11 +112,11 @@ pub mod props {
 	///
 	/// For example, an enum represented on dbus as a string can be easily converted
 	/// to its internal representation as long as the internal enum implements
-	/// `TryFrom<&str>`.  (`I` is most often [`str`], but does not have to be.)
+	/// `TryFrom<&String>`.  (`I` is most often [`String`], but does not have to be.)
 	pub fn prop_get_optional_from<'a, I, T>(map: &'a PropMap, key: &str) -> ErrResult<Option<T>>
-	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'a + ?Sized + 'static
+	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'static
 	{
-		match prop_get_optional::<&I>(map, key) {
+		match prop_get_optional::<I>(map, key) {
 			Ok(Some(v)) => Ok(Some(T::try_from(v)?)),
 			Ok(None) => Ok(None),
 			Err(e) => Err(e),
@@ -126,9 +126,9 @@ pub mod props {
 	/// Like [`prop_get_optional_from()`], but eliminates the inner [`Option`] by
 	/// turning missing keys into errors.
 	pub fn prop_get_mandatory_from<'a, I, T>(map: &'a PropMap, key: &str) -> ErrResult<T>
-	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'a + ?Sized + 'static
+	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'static
 	{
-		match prop_get_mandatory::<&I>(map, key) {
+		match prop_get_mandatory::<I>(map, key) {
 			Ok(v) => Ok(T::try_from(v)?),
 			Err(e) => Err(e),
 		}
@@ -137,9 +137,9 @@ pub mod props {
 	/// Like [`prop_get_optional_from()`], but eliminates the inner [`Option`] by
 	/// returning a provided default if the key is absent.
 	pub fn prop_get_default_from<'a, I, T>(map: &'a PropMap, key: &str, default: T) -> ErrResult<T>
-	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'a + ?Sized + 'static
+	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'static
 	{
-		match prop_get_optional::<&I>(map, key) {
+		match prop_get_optional::<I>(map, key) {
 			Ok(Some(v)) => Ok(T::try_from(v)?),
 			Ok(None) => Ok(default),
 			Err(e) => Err(e),

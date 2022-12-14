@@ -27,10 +27,10 @@ enum FanSensorType {
 	AspeedFan,
 }
 
-impl TryFrom<&str> for FanSensorType {
+impl TryFrom<&String> for FanSensorType {
 	type Error = Box<dyn std::error::Error>;
-	fn try_from(s: &str) -> ErrResult<Self> {
-		match s {
+	fn try_from(s: &String) -> ErrResult<Self> {
+		match s.as_ref() {
 			"AspeedFan" => Ok(Self::AspeedFan),
 			_ => Err(err_unsupported(format!("Unsupported fan sensor type '{}'", s))),
 		}
@@ -61,8 +61,8 @@ impl FanSensorConfig {
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let index = *prop_get_mandatory(basecfg, "Index")?;
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
-		let power_state = prop_get_default_from::<str, _>(basecfg, "PowerState", PowerState::Always)?;
-		let subtype = prop_get_mandatory_from::<str, FanSensorType>(basecfg, "Type")?;
+		let power_state = prop_get_default_from(basecfg, "PowerState", PowerState::Always)?;
+		let subtype = prop_get_mandatory_from(basecfg, "Type")?;
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 		let minreading = *prop_get_default(basecfg, "MinReading", &0.0f64)?;
 		let maxreading = *prop_get_default(basecfg, "MaxReading", &25000.0f64)?; // default carried over from dbus-sensors's fansensor

@@ -56,7 +56,7 @@ impl ADCSensorConfig {
 		let index: u64 = *prop_get_mandatory(basecfg, "Index")?;
 		let poll_sec: u64 = *prop_get_default(basecfg, "PollRate", &1u64)?;
 		let scale: f64 = *prop_get_default(basecfg, "ScaleFactor", &1.0f64)?;
-		let power_state = prop_get_default_from::<str, _>(basecfg, "PowerState", PowerState::Always)?;
+		let power_state = prop_get_default_from(basecfg, "PowerState", PowerState::Always)?;
 		let bridge_gpio = match intfs.get("xyz.openbmc_project.Configuration.ADC.BridgeGpio0") {
 			Some(map) => Some(Arc::new(BridgeGPIOConfig::from_dbus(map)?)),
 			None => None,

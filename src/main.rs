@@ -39,6 +39,7 @@ mod sysfs;
 mod threshold;
 mod dbus_helpers;
 
+use powerstate::host_state;
 use types::*;
 use sensor::{
 	SensorConfig,
@@ -208,7 +209,7 @@ async fn main() -> ErrResult<()> {
 
 	let sensor_intfs = sensor::build_sensor_intfs(&mut cr);
 
-	powerstate::init_host_state(&bus).await;
+	host_state::init_host_state(&bus).await;
 
 	let cfg = get_config(&bus).await?; // FIXME (error handling)
 
@@ -241,7 +242,7 @@ async fn main() -> ErrResult<()> {
 		}
 	};
 
-	let _powersignals = powerstate::register_power_signal_handler(&daemonstate.bus, powerhandler).await?;
+	let _powersignals = host_state::register_power_signal_handler(&daemonstate.bus, powerhandler).await?;
 
 	let prophandler = move |msg: dbus::message::Message, _, _| async move {
 		handle_propchange(daemonstate, msg).await;

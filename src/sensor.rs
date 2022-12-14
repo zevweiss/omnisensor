@@ -6,7 +6,6 @@ use std::{
 	time::Duration,
 };
 use dbus::nonblock::SyncConnection;
-use strum::IntoEnumIterator;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -22,7 +21,6 @@ use crate::{
 		ThresholdArr,
 		ThresholdConfig,
 		ThresholdIntfDataArr,
-		ThresholdSeverity,
 	},
 	dbus_helpers::SignalProp,
 };
@@ -360,8 +358,8 @@ impl Sensor {
 	async fn set_value(&mut self, newval: f64) {
 		self.cache.set(newval);
 
-		for sev in ThresholdSeverity::iter() {
-			if let Some(t) = &mut self.thresholds[sev as usize] {
+		for threshold in self.thresholds.iter_mut() {
+			if let Some(t) = threshold {
 				t.update(newval);
 			}
 		}
@@ -471,12 +469,10 @@ impl Sensor {
 			sensor_intfs.availability.token,
 			sensor_intfs.opstatus.token,
 		];
-		for sev in ThresholdSeverity::iter() {
-			if self.thresholds[sev as usize].is_none() {
-				continue;
+		for (threshold, intf) in self.thresholds.iter().zip(&sensor_intfs.thresholds) {
+			if threshold.is_some() {
+				ifaces.push(intf.token);
 			}
-			let intfdata = &sensor_intfs.thresholds[sev as usize];
-			ifaces.push(intfdata.token);
 		}
 		cr.lock().unwrap().insert(self.dbuspath.0.clone(), &ifaces, cbdata.clone());
 	}

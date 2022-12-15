@@ -16,7 +16,10 @@ use dbus::{
 	nonblock,
 	nonblock::{
 		SyncConnection,
-		stdintf::org_freedesktop_dbus::ObjectManager,
+		stdintf::org_freedesktop_dbus::{
+			ObjectManager,
+			RequestNameReply,
+		},
 	},
 };
 use dbus_crossroads::Crossroads;
@@ -258,7 +261,14 @@ async fn main() -> ErrResult<()> {
 		true
 	}));
 
-	daemonstate.bus.request_name(DBUS_NAME, false, false, false).await?;
+	let reply = daemonstate.bus.request_name(DBUS_NAME, false, false, true).await?;
+	match reply {
+		RequestNameReply::PrimaryOwner => (), // OK
+		_ => {
+			let msg = format!("Failed to acquire dbus name {}: {:?}", DBUS_NAME, reply);
+			return Err(err_other(msg));
+		},
+	}
 
 	println!("Hello, world!");
 

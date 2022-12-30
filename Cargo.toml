@@ -10,9 +10,9 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.22", features = ["full"] }
-dbus = "0.9"
-dbus-tokio = "0.7"
-dbus-crossroads = "0.5"
+dbus = "~0.9.7"
+dbus-tokio = "~0.7.5"
+dbus-crossroads = "~0.5.2"
 futures = "0.3"
 gpiocdev = "0.4"
 glob = "0.3"

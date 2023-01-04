@@ -249,3 +249,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 	Ok(())
 }
+
+/// Whether or not the given `cfgtype` is supported by the `hwmon` sensor backend.
+pub fn match_cfgtype(cfgtype: &str) -> bool {
+	get_device_type(cfgtype).is_some()
+}

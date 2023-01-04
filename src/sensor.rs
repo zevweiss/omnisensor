@@ -137,27 +137,26 @@ impl SensorConfig {
 		}
 		let cfgtype = parts[3];
 
-		let res = match cfgtype {
-			#[cfg(feature = "adc")]
-			"ADC" => adc::ADCSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::ADC),
+		#[cfg(feature = "adc")]
+		if adc::match_cfgtype(cfgtype) {
+			return Some(adc::ADCSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::ADC));
+		}
 
-			"LM25066"|"W83773G"|"NCT6779"|"pmbus" => hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon),
+		if hwmon::match_cfgtype(cfgtype) {
+			return Some(hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon));
+		}
 
-			#[cfg(feature = "fan")]
-			"AspeedFan" => fan::FanSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Fan),
+		#[cfg(feature = "fan")]
+		if fan::match_cfgtype(cfgtype) {
+			return Some(fan::FanSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Fan));
+		}
 
-			#[cfg(feature = "peci")]
-			"XeonCPU" => peci::PECISensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::PECI),
+		#[cfg(feature = "peci")]
+		if peci::match_cfgtype(cfgtype) {
+			return Some(peci::PECISensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::PECI));
+		}
 
-			_ => {
-				println!("\t{}:", intf);
-				for (p, v) in props {
-					println!("\t\t{}: {:?}", p, v);
-				}
-				Err(err_unsupported(format!("unsupported Configuration type '{}'", cfgtype)))
-			}
-		};
-		Some(res)
+		return Some(Err(err_unsupported(format!("unsupported Configuration type '{}'", cfgtype))));
 	}
 }
 

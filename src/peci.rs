@@ -182,3 +182,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 	Ok(())
 }
+
+/// Whether or not the given `cfgtype` is supported by the `peci` sensor backend.
+pub fn match_cfgtype(cfgtype: &str) -> bool {
+	cfgtype == "XeonCPU"
+}

@@ -654,7 +654,7 @@ pub struct SensorIntfData {
 	pub availability: SensorIntf<AvailabilityIntfMsgFns>,
 	/// The `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
 	pub opstatus: SensorIntf<OpStatusIntfMsgFns>,
-	/// A per-severity-level array of `xyz.openbmc_project.Sensor.Threshold.$severity`
+	/// A per-severity-level array of `xyz.openbmc_project.Sensor.Threshold.$everity`
 	/// interfaces.
 	pub thresholds: threshold::ThresholdIntfDataArr,
 	/// The `xyz.openbmc_project.Association.Definitions` interface.

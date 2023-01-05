@@ -235,6 +235,17 @@ impl SensorIOCtx {
 	}
 }
 
+/// A sensor's (dbus) read-only or read-write mode.
+pub enum SensorMode {
+	/// The sensor's value is read-only via dbus.
+	ReadOnly,
+
+	/// The sensor's value can be written via dbus.
+	///
+	/// The boxed callback will be called when a dbus write occurs.
+	ReadWrite(Box<dyn Fn(&Sensor, f64) + Send>),
+}
+
 /// The top-level representation of a sensor.
 pub struct Sensor {
 	/// The globally-unique name of the sensor.
@@ -271,6 +282,9 @@ pub struct Sensor {
 	/// The dbus property that provides the sensor's associations.
 	associations: SignalProp<Vec<(String, String, String)>>,
 
+	/// The sensor's dbus RO/RW mode.
+	mode: SensorMode,
+
 	/// The sensor's running I/O task.
 	///
 	/// This is [`Some`] when the sensor is active and [`None`] when it's inactive
@@ -284,12 +298,13 @@ impl Sensor {
 	///
 	/// It will initially be disabled (no running I/O task); it can subsequently be
 	/// enabled by a call to its [`activate()`](Sensor::activate) method.
-	pub fn new(cfgpath: &InventoryPath, name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>) -> Self {
+	pub fn new(cfgpath: &InventoryPath, name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>, mode: SensorMode) -> Self {
 		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 		let cleanname = name.replace(badchar, "_");
 		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
 		let dbuspath = Arc::new(SensorPath(dbuspath.into()));
-		let cache = SignalProp::new(f64::NAN, &intfs.value.msgfns.value, &dbuspath, conn);
+		let value_msgfn = &intfs.value_intf(&mode).msgfns.value;
+		let cache = SignalProp::new(f64::NAN, value_msgfn, &dbuspath, conn);
 		let minvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.minvalue, &dbuspath, conn);
 		let maxvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
 		let available = SignalProp::new(false, &intfs.availability.msgfns.available, &dbuspath, conn);
@@ -323,6 +338,7 @@ impl Sensor {
 			available,
 			functional,
 			associations,
+			mode,
 
 			iotask: None,
 		}
@@ -480,7 +496,7 @@ impl Sensor {
 			   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
 	{
 		let mut ifaces = vec![
-			sensor_intfs.value.token,
+			sensor_intfs.value_intf(&self.mode).token,
 			sensor_intfs.availability.token,
 			sensor_intfs.opstatus.token,
 			sensor_intfs.assoc.token,
@@ -541,10 +557,12 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 /// Construct a property for a sensor interface.
 ///
 /// The value will be retrieved by calling `getter()` on the sensor.
-fn build_sensor_property<F, R>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>, name: &str, getter: F) -> Box<PropChgMsgFn>
-where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::arg::Arg + dbus::arg::Append + Send + 'static
+fn build_sensor_property<G, S, V>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>, name: &str, getter: G, setter: Option<S>) -> Box<PropChgMsgFn>
+where G: Fn(&Sensor) -> V + Send + Copy + 'static,
+      S: Fn(&mut Sensor, V) + Send + Copy + 'static,
+      V: dbus::arg::RefArg + dbus::arg::Arg + dbus::arg::Append + for<'a> dbus::arg::Get<'a> + Send + 'static
 {
-	b.property(name)
+	let pb = b.property(name)
 		.get_async(move |mut ctx, sensor| {
 			let sensor = sensor.clone();
 			async move {
@@ -554,9 +572,43 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 				};
 				ctx.reply(Ok(value))
 			}
+		});
+
+	let pb = if let Some(setter) = setter {
+		pb.set_async(move |mut ctx, sensor, value| {
+			let sensor = sensor.clone();
+			async move {
+				{
+					let mut s = sensor.lock().await;
+					setter(&mut s, value);
+				}
+
+				// Skip signal emission; we assume that the provided
+				// setter already takes care of it (presumably via a
+				// SignalProp, which includes skipping it if the new value
+				// is the same as the old one).
+				ctx.reply_noemit(Ok(()));
+
+				// FIXME: is there some better way to make the return type
+				// work out here?
+				core::marker::PhantomData
+			}
 		})
-		.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all SignalProps)
+	} else {
+		pb
+	};
+
+	pb.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all SignalProps)
 		.changed_msg_fn()
+}
+
+/// Convenience args for building read-only properties with build_sensor_property()
+mod no_setter {
+	use super::Sensor;
+	pub(super) const F64: Option<fn(&mut Sensor, f64)> = None;
+	pub(super) const STRING: Option<fn(&mut Sensor, String)> = None;
+	pub(super) const BOOL: Option<fn(&mut Sensor, bool)> = None;
+	pub(super) const ASSOCS: Option<fn(&mut Sensor, Vec<(String, String, String)>)> = None;
 }
 
 /// A collection of [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Value`
@@ -570,16 +622,30 @@ pub struct ValueIntfMsgFns {
 
 impl ValueIntfMsgFns {
 	/// Construct the `xyz.openbmc_project.Sensor.Value` interface.
-	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
+	fn build(cr: &mut dbus_crossroads::Crossroads, writable: bool) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.Sensor.Value", |b| {
+			let value_setter = if writable {
+				Some(|s: &mut Sensor, v| {
+					s.cache.set(v);
+					match &s.mode {
+						SensorMode::ReadWrite(cb) => cb(s, v),
+						SensorMode::ReadOnly => {
+							eprintln!("BUG: dbus set ReadOnly sensor {}", s.name);
+						},
+					};
+				})
+			} else {
+				None
+			};
 			Self {
-				unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
-				value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
-				minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get()).into(),
-				maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get()).into(),
+				unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string(), no_setter::STRING).into(),
+				value: build_sensor_property(b, "Value", |s| s.cache.get(), value_setter).into(),
+				minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get(), no_setter::F64).into(),
+				maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get(), no_setter::F64).into(),
 			}
 		})
 	}
+
 }
 
 /// The [`PropChgMsgFn`] for the `xyz.openbmc_project.State.Decorator.Availability`
@@ -593,7 +659,7 @@ impl AvailabilityIntfMsgFns {
 	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
 			Self {
-				available: build_sensor_property(b, "Available", |s| s.available.get()).into(),
+				available: build_sensor_property(b, "Available", |s| s.available.get(), no_setter::BOOL).into(),
 			}
 		})
 	}
@@ -610,7 +676,7 @@ impl OpStatusIntfMsgFns {
 	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
 			Self {
-				functional: build_sensor_property(b, "Functional", |s| s.functional.get()).into(),
+				functional: build_sensor_property(b, "Functional", |s| s.functional.get(), no_setter::BOOL).into(),
 			}
 		})
 	}
@@ -626,7 +692,7 @@ impl AssocIntfMsgFns {
 	pub fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.Association.Definitions", |b| {
 			Self {
-				associations: build_sensor_property(b, "Associations", |s| { s.associations.get_clone() }).into()
+				associations: build_sensor_property(b, "Associations", |s| { s.associations.get_clone() }, no_setter::ASSOCS).into()
 			}
 		})
 	}
@@ -637,6 +703,8 @@ impl AssocIntfMsgFns {
 pub struct SensorIntfData {
 	/// The `xyz.openbmc_project.Sensor.Value` interface.
 	pub value: SensorIntf<ValueIntfMsgFns>,
+	/// The `xyz.openbmc_project.Sensor.Value` interface, with a writable Value property.
+	pub writable_value: SensorIntf<ValueIntfMsgFns>,
 	/// The `xyz.openbmc_project.State.Decorator.Availability` interface.
 	pub availability: SensorIntf<AvailabilityIntfMsgFns>,
 	/// The `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
@@ -652,11 +720,20 @@ impl SensorIntfData {
 	/// Construct [`SensorIntfData`].
 	pub fn build(cr: &mut dbus_crossroads::Crossroads) -> Self {
 		Self {
-			value: ValueIntfMsgFns::build(cr),
+			value: ValueIntfMsgFns::build(cr, false),
+			writable_value: ValueIntfMsgFns::build(cr, true),
 			availability: AvailabilityIntfMsgFns::build(cr),
 			opstatus: OpStatusIntfMsgFns::build(cr),
 			thresholds: threshold::build_sensor_threshold_intfs(cr),
 			assoc: AssocIntfMsgFns::build(cr),
+		}
+	}
+
+	/// Retrieve the appropriate Value interface for the specified writability.
+	pub fn value_intf(&self, mode: &SensorMode) -> &SensorIntf<ValueIntfMsgFns> {
+		match mode {
+			SensorMode::ReadOnly => &self.value,
+			SensorMode::ReadWrite(_) => &self.writable_value,
 		}
 	}
 }

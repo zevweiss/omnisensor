@@ -12,6 +12,7 @@ use crate::{
 	sensor::{
 		Sensor,
 		SensorConfig,
+		SensorMode::ReadOnly,
 		SensorType,
 	},
 	sysfs,
@@ -108,7 +109,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		};
 
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
-			Sensor::new(path,&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus)
+			Sensor::new(path,&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus, ReadOnly)
 				.with_power_state(fancfg.power_state)
 				.with_thresholds_from(&fancfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 				.with_minval(fancfg.minreading)

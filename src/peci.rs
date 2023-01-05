@@ -15,6 +15,7 @@ use crate::{
 		Sensor,
 		SensorConfig,
 		SensorIOCtx,
+		SensorMode::ReadOnly,
 	},
 	threshold,
 	sysfs,
@@ -171,7 +172,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let io = SensorIOCtx::new(io);
 
 			sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
-				Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus)
+				Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus, ReadOnly)
 					.with_power_state(PowerState::On) // FIXME: make configurable?
 					.with_thresholds_from(&pecicfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
 					.with_minval(-128.0)

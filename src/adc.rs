@@ -17,6 +17,7 @@ use crate::{
 	sensor::{
 		Sensor,
 		SensorConfig,
+		SensorMode::ReadOnly,
 		SensorType,
 	},
 	sysfs,
@@ -112,7 +113,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		};
 
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
-			Sensor::new(path, &adccfg.name, SensorType::Voltage, &daemonstate.sensor_intfs, &daemonstate.bus)
+			Sensor::new(path, &adccfg.name, SensorType::Voltage, &daemonstate.sensor_intfs, &daemonstate.bus, ReadOnly)
 				.with_poll_interval(adccfg.poll_interval)
 				.with_scale(adccfg.scale)
 				.with_power_state(adccfg.power_state)

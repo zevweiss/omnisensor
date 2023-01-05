@@ -11,7 +11,6 @@ use tokio::sync::Mutex;
 use crate::{
 	DaemonState,
 	types::*,
-	hwmon,
 	i2c::I2CDevice,
 	gpio::BridgeGPIO,
 	powerstate::PowerState,
@@ -27,6 +26,9 @@ use crate::{
 
 #[cfg(feature = "adc")]
 use crate::adc;
+
+#[cfg(feature = "hwmon")]
+use crate::hwmon;
 
 #[cfg(feature = "fan")]
 use crate::fan;
@@ -109,6 +111,7 @@ impl SensorType {
 
 /// An enum of config data all supported sensor types.
 pub enum SensorConfig {
+	#[cfg(feature = "hwmon")]
 	Hwmon(hwmon::HwmonSensorConfig),
 
 	#[cfg(feature = "adc")]
@@ -142,6 +145,7 @@ impl SensorConfig {
 			return Some(adc::ADCSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::ADC));
 		}
 
+		#[cfg(feature = "hwmon")]
 		if hwmon::match_cfgtype(cfgtype) {
 			return Some(hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon));
 		}
@@ -700,6 +704,7 @@ pub async fn instantiate_all(daemonstate: &DaemonState, filter: &FilterSet<Inven
 		eprintln!("Failed to instantiate PECI sensors: {}", e);
 	});
 
+	#[cfg(feature = "hwmon")]
 	hwmon::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
 		eprintln!("Failed to instantiate hwmon sensors: {}", e);
 	});

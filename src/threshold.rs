@@ -15,7 +15,7 @@ use strum::{EnumCount as _EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 
 use crate::{
-	sensor::{build_sensor_intf, Sensor},
+	sensor::Sensor,
 	types::*,
 	dbus_helpers::{
 		props::*,
@@ -277,53 +277,57 @@ struct ThresholdBoundIntfMsgFns {
 	alarm: Arc<PropChgMsgFn>,
 }
 
+impl ThresholdBoundIntfMsgFns {
+	/// Construct a [`ThresholdBoundIntfMsgFns`] for the given severity `sev` and bound type `kind`.
+	fn build(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, kind: ThresholdBoundType) -> Self
+	{
+		let value = b.property(format!("{}{}", sev.to_str(), kind.direction_tag()))
+			.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].value.get()))
+			.emits_changed_true()
+			.changed_msg_fn()
+			.into();
+
+		let alarm = b.property(format!("{}Alarm{}", sev.to_str(), kind.direction_tag()))
+			.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].alarm.get()))
+			.emits_changed_true()
+			.changed_msg_fn()
+			.into();
+
+		Self {
+			value,
+			alarm,
+		}
+	}
+}
+
 /// The [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Threshold.*` interfaces.
 pub struct ThresholdIntfMsgFns {
 	bounds: ThresholdBoundTypeArray<ThresholdBoundIntfMsgFns>,
+}
+
+impl ThresholdIntfMsgFns {
+	/// Construct a threshold interface for the given severity `sev`.
+	fn build(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<Self> {
+		SensorIntf::build(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
+			let Ok(bounds) = ThresholdBoundType::iter()
+				.map(|t| ThresholdBoundIntfMsgFns::build(b, sev, t))
+				.collect::<Vec<_>>()
+				.try_into() else {
+					panic!("ThresholdBoundType::iter() produced wrong number of elements?");
+				};
+			Self { bounds }
+		})
+	}
 }
 
 /// An per-severity-level array of threshold interfaces, each of which is a
 /// [`ThresholdIntfMsgFns`] plus a dbus interface token.
 pub type ThresholdIntfDataArr = ThresholdSeverityArray<SensorIntf<ThresholdIntfMsgFns>>;
 
-/// Construct a [`ThresholdBoundIntfMsgFns`] for the given severity `sev` and bound type `kind`.
-fn build_threshold_bound_intf(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, kind: ThresholdBoundType) -> ThresholdBoundIntfMsgFns
-{
-	let value = b.property(format!("{}{}", sev.to_str(), kind.direction_tag()))
-		.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].value.get()))
-		.emits_changed_true()
-		.changed_msg_fn()
-		.into();
-
-	let alarm = b.property(format!("{}Alarm{}", sev.to_str(), kind.direction_tag()))
-		.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].alarm.get()))
-		.emits_changed_true()
-		.changed_msg_fn()
-		.into();
-
-	ThresholdBoundIntfMsgFns {
-		value,
-		alarm,
-	}
-}
-
-/// Construct a threshold interface for the given severity `sev`.
-fn build_sensor_threshold_intf(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<ThresholdIntfMsgFns> {
-	build_sensor_intf(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
-		let Ok(bounds) = ThresholdBoundType::iter()
-			.map(|t| build_threshold_bound_intf(b, sev, t))
-			.collect::<Vec<_>>()
-			.try_into() else {
-				panic!("ThresholdBoundType::iter() produced wrong number of elements?");
-			};
-		ThresholdIntfMsgFns { bounds }
-	})
-}
-
 /// Construct threshold interfaces for all severity levels.
 pub fn build_sensor_threshold_intfs(cr: &mut Crossroads) -> ThresholdIntfDataArr {
 	let res = ThresholdSeverity::iter()
-		.map(|sev| build_sensor_threshold_intf(cr, sev))
+		.map(|sev| ThresholdIntfMsgFns::build(cr, sev))
 		.collect::<Vec<_>>()
 		.try_into();
 

@@ -540,34 +540,6 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 	};
 }
 
-/// Build a sensor dbus interface called `intf`.
-///
-/// The properties of the interface are constructed by calling `mkprops()`, which returns
-/// a struct of [`PropChgMsgFn`]s (e.g. [`ValueIntfMsgFns`]), which are returned in
-/// combination with the [`token`](dbus_crossroads::IfaceToken) created for the interface.
-pub fn build_sensor_intf<T, F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> SensorIntf<T>
-	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
-{
-	let mut msgfns: Option<T> = None;
-	let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
-		msgfns = Some(mkprops(b))
-	});
-
-	SensorIntf {
-		token,
-		msgfns: msgfns.expect("no msgfns set?"),
-	}
-}
-
-/// A collection of [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Value`
-/// interface.
-pub struct ValueIntfMsgFns {
-	pub unit: Arc<PropChgMsgFn>,
-	pub value: Arc<PropChgMsgFn>,
-	pub minvalue: Arc<PropChgMsgFn>,
-	pub maxvalue: Arc<PropChgMsgFn>,
-}
-
 /// Construct a property for a sensor interface.
 ///
 /// The value will be retrieved by calling `getter()` on the sensor.
@@ -589,16 +561,27 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 		.changed_msg_fn()
 }
 
-/// Construct the `xyz.openbmc_project.Sensor.Value` interface.
-fn build_sensor_value_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<ValueIntfMsgFns> {
-	build_sensor_intf(cr, "xyz.openbmc_project.Sensor.Value", |b| {
-		ValueIntfMsgFns {
-			unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
-			value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
-			minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get()).into(),
-			maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get()).into(),
-		}
-	})
+/// A collection of [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Value`
+/// interface.
+pub struct ValueIntfMsgFns {
+	pub unit: Arc<PropChgMsgFn>,
+	pub value: Arc<PropChgMsgFn>,
+	pub minvalue: Arc<PropChgMsgFn>,
+	pub maxvalue: Arc<PropChgMsgFn>,
+}
+
+impl ValueIntfMsgFns {
+	/// Construct the `xyz.openbmc_project.Sensor.Value` interface.
+	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
+		SensorIntf::build(cr, "xyz.openbmc_project.Sensor.Value", |b| {
+			Self {
+				unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string()).into(),
+				value: build_sensor_property(b, "Value", |s| s.cache.get()).into(),
+				minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get()).into(),
+				maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get()).into(),
+			}
+		})
+	}
 }
 
 /// The [`PropChgMsgFn`] for the `xyz.openbmc_project.State.Decorator.Availability`
@@ -607,13 +590,15 @@ pub struct AvailabilityIntfMsgFns {
 	pub available: Arc<PropChgMsgFn>,
 }
 
-/// Construct the `xyz.openbmc_project.State.Decorator.Availability` interface.
-fn build_availability_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<AvailabilityIntfMsgFns> {
-	build_sensor_intf(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
-		AvailabilityIntfMsgFns {
-			available: build_sensor_property(b, "Available", |s| s.available.get()).into(),
-		}
-	})
+impl AvailabilityIntfMsgFns {
+	/// Construct the `xyz.openbmc_project.State.Decorator.Availability` interface.
+	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
+		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
+			Self {
+				available: build_sensor_property(b, "Available", |s| s.available.get()).into(),
+			}
+		})
+	}
 }
 
 /// The [`PropChgMsgFn`] for the `xyz.openbmc_project.State.Decorator.OperationalStatus`
@@ -622,13 +607,15 @@ pub struct OpStatusIntfMsgFns {
 	pub functional: Arc<PropChgMsgFn>,
 }
 
-/// Construct the `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
-fn build_opstatus_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<OpStatusIntfMsgFns> {
-	build_sensor_intf(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
-		OpStatusIntfMsgFns {
-			functional: build_sensor_property(b, "Functional", |s| s.functional.get()).into(),
-		}
-	})
+impl OpStatusIntfMsgFns {
+	/// Construct the `xyz.openbmc_project.State.Decorator.OperationalStatus` interface.
+	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
+		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
+			Self {
+				functional: build_sensor_property(b, "Functional", |s| s.functional.get()).into(),
+			}
+		})
+	}
 }
 
 /// The [`PropChgMsgFn`] for the `xyz.openbmc_project.Association.Definitions` interface.
@@ -636,13 +623,15 @@ pub struct AssocIntfMsgFns {
 	pub associations: Arc<PropChgMsgFn>,
 }
 
-/// Construct the `xyz.openbmc_project.Association.Definitions` interface.
-pub fn build_assoc_intf(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<AssocIntfMsgFns> {
-	build_sensor_intf(cr, "xyz.openbmc_project.Association.Definitions", |b| {
-		AssocIntfMsgFns {
-			associations: build_sensor_property(b, "Associations", |s| { s.associations.get_clone() }).into()
-		}
-	})
+impl AssocIntfMsgFns {
+	/// Construct the `xyz.openbmc_project.Association.Definitions` interface.
+	pub fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
+		SensorIntf::build(cr, "xyz.openbmc_project.Association.Definitions", |b| {
+			Self {
+				associations: build_sensor_property(b, "Associations", |s| { s.associations.get_clone() }).into()
+			}
+		})
+	}
 }
 
 
@@ -661,14 +650,16 @@ pub struct SensorIntfData {
 	pub assoc: SensorIntf<AssocIntfMsgFns>,
 }
 
-/// Construct [`SensorIntfData`].
-pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfData {
-	SensorIntfData {
-		value: build_sensor_value_intf(cr),
-		availability: build_availability_intf(cr),
-		opstatus: build_opstatus_intf(cr),
-		thresholds: threshold::build_sensor_threshold_intfs(cr),
-		assoc: build_assoc_intf(cr),
+impl SensorIntfData {
+	/// Construct [`SensorIntfData`].
+	pub fn build(cr: &mut dbus_crossroads::Crossroads) -> Self {
+		Self {
+			value: ValueIntfMsgFns::build(cr),
+			availability: AvailabilityIntfMsgFns::build(cr),
+			opstatus: OpStatusIntfMsgFns::build(cr),
+			thresholds: threshold::build_sensor_threshold_intfs(cr),
+			assoc: AssocIntfMsgFns::build(cr),
+		}
 	}
 }
 

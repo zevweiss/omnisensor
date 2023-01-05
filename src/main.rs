@@ -210,7 +210,7 @@ async fn main() -> ErrResult<()> {
 	cr.set_async_support(Some((bus.clone(), Box::new(|x| { tokio::spawn(x); }))));
 	cr.set_object_manager_support(Some(bus.clone()));
 
-	let sensor_intfs = sensor::build_sensor_intfs(&mut cr);
+	let sensor_intfs = sensor::SensorIntfData::build(&mut cr);
 
 	#[cfg(feature = "hostpower")]
 	host_state::init_host_state(&bus).await;

@@ -94,6 +94,27 @@ pub struct SensorIntf<T> {
 	pub msgfns: T,
 }
 
+impl<T> SensorIntf<T> {
+	/// Build a sensor dbus interface called `intf`.
+	///
+	/// The properties of the interface are constructed by calling `mkprops()`, which returns
+	/// a struct of [`PropChgMsgFn`]s (e.g. [`ValueIntfMsgFns`]), which are returned in
+	/// combination with the [`token`](dbus_crossroads::IfaceToken) created for the interface.
+	pub fn build<F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> Self
+	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
+	{
+		let mut msgfns: Option<T> = None;
+		let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
+			msgfns = Some(mkprops(b))
+		});
+
+		Self {
+			token,
+			msgfns: msgfns.expect("no msgfns set?"),
+		}
+	}
+}
+
 /// A newtype for a dbus path to reduce the likelihood of mixing up inventory
 /// paths and sensor paths.
 #[derive(Debug, PartialEq, Eq, Hash)]

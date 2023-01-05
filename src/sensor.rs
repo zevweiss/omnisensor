@@ -191,15 +191,15 @@ pub struct SensorIOCtx {
 	i2cdev: Option<Arc<I2CDevice>>,
 }
 
-/// A running task periodically sampling the sensor.
-struct SensorIOTask {
-	update_task: tokio::task::JoinHandle<()>,
-}
+/// A running task that updates a sensor's value.
+///
+/// Wrapped in a struct so that we can stop it in its Drop implementation.
+struct SensorIOTask(tokio::task::JoinHandle<()>);
 
 impl Drop for SensorIOTask {
 	/// Stops [`SensorIOTask::update_task`] when the [`SensorIOTask`] goes away.
 	fn drop(&mut self) {
-		self.update_task.abort();
+		self.0.abort();
 	}
 }
 
@@ -445,9 +445,7 @@ impl Sensor {
 			}
 		};
 
-		let iotask = SensorIOTask {
-			update_task: tokio::spawn(update_loop),
-		};
+		let iotask = SensorIOTask(tokio::spawn(update_loop));
 
 		// It'd be nice to find some way to arrange things such that this error
 		// case (and the mirror one in deactivate()) vanished by construction, but

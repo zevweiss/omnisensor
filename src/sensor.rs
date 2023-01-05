@@ -191,11 +191,8 @@ pub struct SensorIOCtx {
 	i2cdev: Option<Arc<I2CDevice>>,
 }
 
-/// A [`SensorIOCtx`] plus a running task for updating it.
+/// A running task periodically sampling the sensor.
 struct SensorIOTask {
-	/// The sensor I/O context.
-	ctx: SensorIOCtx,
-	/// A running task periodically sampling the sensor.
 	update_task: tokio::task::JoinHandle<()>,
 }
 
@@ -385,23 +382,12 @@ impl Sensor {
 		}
 	}
 
-	/// Read a sample from the sensor and perform the ensuing state updates.
-	async fn update(&mut self) -> ErrResult<()> {
-		if let Some(iotask) = &mut self.iotask {
-			let val = iotask.ctx.read().await?;
-			self.set_value(val * self.scale).await;
-			Ok(())
-		} else {
-			Err(err_not_found("update() called on inactive sensor"))
-		}
-	}
-
 	/// Start a sensor's update task using the provided `ioctx` and mark it available.
 	///
 	/// This is an associated function rather than a method on `self` because it needs
 	/// to pass a weak reference to itself into the future that gets spawned as
 	/// [`update_task`](SensorIOTask::update_task), and we need an [`Arc`] for that.
-	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, ioctx: SensorIOCtx) {
+	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, mut ioctx: SensorIOCtx) {
 		let mut s = sensor.lock().await;
 		let poll_interval = s.poll_interval;
 
@@ -423,15 +409,27 @@ impl Sensor {
 				// and hence is the period of the whole cyclic operation).
 				let sleep = tokio::time::sleep(poll_interval);
 
+				// Stringify the error message here, because 'dyn Error'
+				// isn't Send, so we can't hold the ErrResult across an
+				// await.
+				let readresult = ioctx.read().await.map_err(|e| e.to_string());
+
 				let mut sensor = sensor.lock().await;
 
-				if sensor.iotask.is_some() {
-					if let Err(e) = sensor.update().await {
-						eprintln!("failed to update {}: {}", sensor.name, e);
-					}
-				} else {
+				if sensor.iotask.is_none() {
 					eprintln!("BUG: update task running on inactive sensor");
+					break;
 				}
+
+				match readresult {
+					Ok(v) => {
+						let newval = v * sensor.scale;
+						sensor.set_value(newval).await;
+					},
+					Err(e) => {
+						eprintln!("failed to update {}: {}", sensor.name, e);
+					},
+				};
 
 				// Read the poll interval for the sleep on the next
 				// iteration of the loop
@@ -448,7 +446,6 @@ impl Sensor {
 		};
 
 		let iotask = SensorIOTask {
-			ctx: ioctx,
 			update_task: tokio::spawn(update_loop),
 		};
 

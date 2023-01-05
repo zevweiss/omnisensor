@@ -581,8 +581,11 @@ where F: Fn(&Sensor) -> R + Send + Copy + 'static, R: dbus::arg::RefArg + dbus::
 		.get_async(move |mut ctx, sensor| {
 			let sensor = sensor.clone();
 			async move {
-				let s = sensor.lock().await;
-				ctx.reply(Ok(getter(&s)))
+				let value = {
+					let s = sensor.lock().await;
+					getter(&s)
+				};
+				ctx.reply(Ok(value))
 			}
 		})
 		.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all SignalProps)

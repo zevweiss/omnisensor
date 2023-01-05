@@ -279,7 +279,7 @@ pub struct Sensor {
 	/// This is [`Some`] when the sensor is active and [`None`] when it's inactive
 	/// (e.g. when the host's current power state doesn't match the sensor's
 	/// `power_state`).
-	io: Option<SensorIOTask>,
+	iotask: Option<SensorIOTask>,
 }
 
 impl Sensor {
@@ -327,7 +327,7 @@ impl Sensor {
 			functional,
 			associations,
 
-			io: None,
+			iotask: None,
 		}
 	}
 
@@ -387,8 +387,8 @@ impl Sensor {
 
 	/// Read a sample from the sensor and perform the ensuing state updates.
 	async fn update(&mut self) -> ErrResult<()> {
-		if let Some(io) = &mut self.io {
-			let val = io.ctx.read().await?;
+		if let Some(iotask) = &mut self.iotask {
+			let val = iotask.ctx.read().await?;
 			self.set_value(val * self.scale).await;
 			Ok(())
 		} else {
@@ -425,7 +425,7 @@ impl Sensor {
 
 				let mut sensor = sensor.lock().await;
 
-				if sensor.io.is_some() {
+				if sensor.iotask.is_some() {
 					if let Err(e) = sensor.update().await {
 						eprintln!("failed to update {}: {}", sensor.name, e);
 					}
@@ -447,7 +447,7 @@ impl Sensor {
 			}
 		};
 
-		let io = SensorIOTask {
+		let iotask = SensorIOTask {
 			ctx: ioctx,
 			update_task: tokio::spawn(update_loop),
 		};
@@ -455,7 +455,7 @@ impl Sensor {
 		// It'd be nice to find some way to arrange things such that this error
 		// case (and the mirror one in deactivate()) vanished by construction, but
 		// I haven't been able to do so thus far...
-		if s.io.replace(io).is_some() {
+		if s.iotask.replace(iotask).is_some() {
 			eprintln!("BUG: re-activating already-active sensor {}", s.name);
 		}
 
@@ -464,14 +464,14 @@ impl Sensor {
 
 	/// Stop a sensor's update task and mark it unavailable.
 	pub async fn deactivate(&mut self) {
-		let oldio = self.io.take();
-		if oldio.is_none() {
+		let oldiotask = self.iotask.take();
+		if oldiotask.is_none() {
 			eprintln!("BUG: deactivate already-inactive sensor {}", self.name);
 		}
 
 		// Could just let this go out of scope, but might as well be explicit
 		// (this is what aborts the update task)
-		drop(oldio);
+		drop(oldiotask);
 
 		self.set_value(f64::NAN).await;
 		self.available.set(false)
@@ -512,7 +512,7 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) ->
 {
 	let entry = sensors.entry(key);
 	if let SensorMapEntry::Occupied(ref e) = entry {
-		if e.get().lock().await.io.is_some() {
+		if e.get().lock().await.iotask.is_some() {
 			return None;
 		}
 	}
@@ -680,7 +680,7 @@ pub fn build_sensor_intfs(cr: &mut dbus_crossroads::Crossroads) -> SensorIntfDat
 pub async fn deactivate(sensors: &mut SensorMap) {
 	for sensor in sensors.values_mut() {
 		let sensor = &mut *sensor.lock().await;
-		if sensor.io.is_none() { // FIXME: wrap this check or something?
+		if sensor.iotask.is_none() { // FIXME: wrap this check or something?
 			continue;
 		};
 		if sensor.power_state.active_now() {

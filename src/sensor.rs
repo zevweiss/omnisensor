@@ -36,6 +36,9 @@ use crate::fan;
 #[cfg(feature = "peci")]
 use crate::peci;
 
+#[cfg(feature = "external")]
+use crate::external;
+
 /// The type of a sensor.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SensorType {
@@ -134,6 +137,9 @@ pub enum SensorConfig {
 
 	#[cfg(feature = "peci")]
 	PECI(peci::PECISensorConfig),
+
+	#[cfg(feature = "external")]
+	External(external::ExternalSensorConfig),
 }
 
 impl SensorConfig {
@@ -172,6 +178,11 @@ impl SensorConfig {
 			return Some(peci::PECISensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::PECI));
 		}
 
+		#[cfg(feature = "external")]
+		if external::match_cfgtype(cfgtype) {
+			return Some(external::ExternalSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::External));
+		}
+
 		return Some(Err(err_unsupported(format!("unsupported Configuration type '{}'", cfgtype))));
 	}
 }
@@ -182,14 +193,20 @@ pub type SensorConfigMap = HashMap<Arc<InventoryPath>, SensorConfig>;
 /// An enum of underlying I/O mechanisms used to retrieve sensor readings.
 pub enum SensorIO {
 	Sysfs(sysfs::SysfsSensorIO),
+
+	#[cfg(feature = "external")]
+	External(external::ExternalSensorIO),
 }
 
 impl SensorIO {
 	/// Read a sample for a sensor.
 	async fn read(&mut self) -> ErrResult<f64> {
 		match self {
-			Self::Sysfs(x) => x.read(),
-		}.await
+			Self::Sysfs(x) => x.read().await,
+
+			#[cfg(feature = "external")]
+			Self::External(x) => x.read().await,
+		}
 	}
 }
 
@@ -796,5 +813,10 @@ pub async fn instantiate_all(daemonstate: &DaemonState, filter: &FilterSet<Inven
 	#[cfg(feature = "hwmon")]
 	hwmon::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
 		eprintln!("Failed to instantiate hwmon sensors: {}", e);
+	});
+
+	#[cfg(feature = "external")]
+	external::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
+		eprintln!("Failed to instantiate external sensors: {}", e);
 	});
 }

@@ -36,6 +36,8 @@ mod fan;
 mod hwmon;
 #[cfg(feature = "peci")]
 mod peci;
+#[cfg(feature = "external")]
+mod external;
 mod i2c;
 mod gpio;
 mod powerstate;

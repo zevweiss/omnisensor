@@ -181,6 +181,11 @@ impl SensorIO {
 	}
 }
 
+/// Type alias for an async function used to determine when a sensor's reading should next be updated.
+///
+/// The update will occur when the returned future resolves.
+type NextUpdateFn = Box<dyn FnMut(&Sensor) -> futures::future::BoxFuture<'static, ()> + Send + Sync>;
+
 /// A [`SensorIO`] plus some surrounding context.
 pub struct SensorIOCtx {
 	/// The sensor I/O mechanism.
@@ -189,6 +194,8 @@ pub struct SensorIOCtx {
 	bridge_gpio: Option<BridgeGPIO>,
 	/// A reference to an I2C device associated with the sensor.
 	i2cdev: Option<Arc<I2CDevice>>,
+	/// Function returning a future to await before performing an update of the sensor's value.
+	next_update: NextUpdateFn,
 }
 
 /// A running task that updates a sensor's value.
@@ -210,6 +217,7 @@ impl SensorIOCtx {
 			io,
 			bridge_gpio: None,
 			i2cdev: None,
+			next_update: Box::new(|s| Box::pin(tokio::time::sleep(s.poll_interval))),
 		}
 	}
 
@@ -222,6 +230,12 @@ impl SensorIOCtx {
 	/// Add an [`I2CDevice`] to a sensor I/O context.
 	pub fn with_i2cdev(mut self, i2cdev: Option<Arc<I2CDevice>>) -> Self {
 		self.i2cdev = i2cdev;
+		self
+	}
+
+	/// Replace the default (periodic polling) [`next_update`] function of a sensor I/O context.
+	pub fn with_next_update(mut self, next: NextUpdateFn) -> Self {
+		self.next_update = next;
 		self
 	}
 
@@ -404,26 +418,23 @@ impl Sensor {
 	/// to pass a weak reference to itself into the future that gets spawned as
 	/// [`update_task`](SensorIOTask::update_task), and we need an [`Arc`] for that.
 	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, mut ioctx: SensorIOCtx) {
-		let mut s = sensor.lock().await;
-		let poll_interval = s.poll_interval;
-
 		// Use a weak reference in the update task closure so it doesn't hold a
-		// strong reference to the sensor (which would create a reference loop via
-		// s.update_task and make it un-droppable)
+		// strong reference to the sensor (which would create a reference loop and
+		// make it un-droppable)
 		let weakref = Arc::downgrade(sensor);
 
 		let update_loop = async move {
-			let mut poll_interval = poll_interval;
 			loop {
 				let Some(sensor) = weakref.upgrade() else {
 					break;
 				};
 
-				// Create the sleep here to schedule the timeout but don't
-				// wait for it (so that the interval includes the time
-				// spent acquiring the lock and doing the update itself,
-				// and hence is the period of the whole cyclic operation).
-				let sleep = tokio::time::sleep(poll_interval);
+				// Set up the sleep here (but don't wait for it) to
+				// schedule the timeout for the next update (so that the
+				// interval includes the time spent acquiring the lock and
+				// doing the update itself, and hence is the period of the
+				// whole cyclic operation
+				let next = (ioctx.next_update)(&*sensor.lock().await);
 
 				// Stringify the error message here, because 'dyn Error'
 				// isn't Send, so we can't hold the ErrResult across an
@@ -447,30 +458,30 @@ impl Sensor {
 					},
 				};
 
-				// Read the poll interval for the sleep on the next
-				// iteration of the loop
-				poll_interval = sensor.poll_interval;
+				drop(sensor); // Release the lock while we await the next update
 
-				drop(sensor); // Release the lock while we sleep
-
-				// Now await the sleep.  Do this after the read instead of
-				// before so the first read happens promptly (so we avoid
-				// a long wait before the first sample for sensors with
-				// large poll intervals)
-				sleep.await;
+				// Wait until it's time for the next update.  Do this
+				// after the read instead of before so the first read
+				// happens promptly (so we avoid a long wait before the
+				// first sample for sensors with large poll intervals).
+				next.await;
 			}
 		};
+
+		// Acquire the lock before spawning the iotask so that its iotask.is_none()
+		// check doesn't fail because we haven't set it yet.
+		let mut sensor = sensor.lock().await;
 
 		let iotask = SensorIOTask(tokio::spawn(update_loop));
 
 		// It'd be nice to find some way to arrange things such that this error
 		// case (and the mirror one in deactivate()) vanished by construction, but
 		// I haven't been able to do so thus far...
-		if s.iotask.replace(iotask).is_some() {
-			eprintln!("BUG: re-activating already-active sensor {}", s.name);
+		if sensor.iotask.replace(iotask).is_some() {
+			eprintln!("BUG: re-activating already-active sensor {}", sensor.name);
 		}
 
-		s.available.set(true)
+		sensor.available.set(true)
 	}
 
 	/// Stop a sensor's update task and mark it unavailable.

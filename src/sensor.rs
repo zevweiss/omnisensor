@@ -58,6 +58,18 @@ impl SensorType {
 		}
 	}
 
+	/// Return the sensor type indicated by the given unit string.
+	pub fn from_unit_str(unit: &str) -> Option<Self> {
+		match unit {
+			"DegreesC" => Some(Self::Temperature),
+			"RPMS" => Some(Self::RPM),
+			"Volts" => Some(Self::Voltage),
+			"Amperes" => Some(Self::Current),
+			"Watts" => Some(Self::Power),
+			_ => None,
+		}
+	}
+
 	/// Return the category in the dbus sensors hierarchy for a [`SensorType`] (i.e. a
 	/// dbus path component).
 	pub fn dbus_category(&self) -> &'static str {

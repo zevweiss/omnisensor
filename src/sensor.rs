@@ -473,7 +473,7 @@ impl Sensor {
 				let mut sensor = sensor.lock().await;
 
 				if sensor.iotask.is_none() {
-					eprintln!("BUG: update task running on inactive sensor");
+					eprintln!("BUG: update task running on inactive sensor {}", sensor.name);
 					break;
 				}
 

@@ -97,9 +97,11 @@ pub struct SensorIntf<T> {
 impl<T> SensorIntf<T> {
 	/// Build a sensor dbus interface called `intf`.
 	///
-	/// The properties of the interface are constructed by calling `mkprops()`, which returns
-	/// a struct of [`PropChgMsgFn`]s (e.g. [`ValueIntfMsgFns`]), which are returned in
-	/// combination with the [`token`](dbus_crossroads::IfaceToken) created for the interface.
+	/// The properties of the interface are constructed by calling
+	/// `mkprops()`, which returns a struct of [`PropChgMsgFn`]s
+	/// (e.g. [`ValueIntfMsgFns`](crate::sensor::ValueIntfMsgFns)), which
+	/// are returned in combination with the
+	/// [`token`](dbus_crossroads::IfaceToken) created for the interface.
 	pub fn build<F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> Self
 	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
 	{

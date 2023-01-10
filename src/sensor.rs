@@ -233,7 +233,7 @@ pub struct SensorIOCtx {
 struct SensorIOTask(tokio::task::JoinHandle<()>);
 
 impl Drop for SensorIOTask {
-	/// Stops [`SensorIOTask::update_task`] when the [`SensorIOTask`] goes away.
+	/// Stops the contained task when the [`SensorIOTask`] goes away.
 	fn drop(&mut self) {
 		self.0.abort();
 	}
@@ -262,7 +262,8 @@ impl SensorIOCtx {
 		self
 	}
 
-	/// Replace the default (periodic polling) [`next_update`] function of a sensor I/O context.
+	/// Replace the default (periodic polling) [`next_update`](Self::next_update)
+	/// function of a sensor I/O context.
 	pub fn with_next_update(mut self, next: NextUpdateFn) -> Self {
 		self.next_update = next;
 		self
@@ -445,7 +446,7 @@ impl Sensor {
 	///
 	/// This is an associated function rather than a method on `self` because it needs
 	/// to pass a weak reference to itself into the future that gets spawned as
-	/// [`update_task`](SensorIOTask::update_task), and we need an [`Arc`] for that.
+	/// [`Sensor::iotask`], and we need an [`Arc`] for that.
 	pub async fn activate(sensor: &Arc<Mutex<Sensor>>, mut ioctx: SensorIOCtx) {
 		// Use a weak reference in the update task closure so it doesn't hold a
 		// strong reference to the sensor (which would create a reference loop and

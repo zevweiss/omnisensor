@@ -184,7 +184,7 @@ pub async fn prepare_indexed_hwmon_ioctx(hwmondir: &Path, idx: u64, kind: Sensor
 		Some(c) => Some(gpio::BridgeGPIO::from_config(c.clone())?),
 		None => None,
 	};
-	let io = SysfsSensorIO::new(&file).await?;
+	let io = SensorIO::Sysfs(SysfsSensorIO::new(&file).await?);
 	Ok(Some(SensorIOCtx::new(io).with_bridge_gpio(bridge_gpio)))
 }
 
@@ -202,13 +202,15 @@ pub struct SysfsSensorIO {
 }
 
 impl SysfsSensorIO {
-	/// Construct a [`SensorIO`] for a provided hwmon file.
-	pub async fn new(file: &HwmonFileInfo) -> ErrResult<SensorIO> {
+	/// Construct a [`SysfsSensorIO`] for a provided hwmon file.
+	///
+	/// For use with [`SensorIO::Sysfs`].
+	pub async fn new(file: &HwmonFileInfo) -> ErrResult<Self> {
 		let fd = tokio::fs::File::open(&file.abspath).await?;
-		Ok(SensorIO::Sysfs(SysfsSensorIO {
+		Ok(Self {
 			fd,
 			scale: file.kind.hwmon_scale(),
-		}))
+		})
 	}
 
 	/// Read a sensor sample (in natural units, e.g. degrees C instead of hwmon's

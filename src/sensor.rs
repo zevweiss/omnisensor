@@ -327,6 +327,9 @@ pub struct Sensor {
 	/// [elsewhere](sysfs::SysfsSensorIO::read).
 	scale: f64,
 
+	/// The number of failed update attempts since the last successful one.
+	errcount: usize,
+
 	/// The dbus property that provides the sensor's value.
 	cache: SignalProp<f64>,
 	/// The dbus property that provides the sensor's minimum value.
@@ -350,6 +353,10 @@ pub struct Sensor {
 	/// `power_state`).
 	iotask: Option<SensorIOTask>,
 }
+
+/// The number of consecutive update errors after which a sensor's
+/// Functional attribute is set to false.
+const MAX_ERRORS: usize = 5;
 
 impl Sensor {
 	/// Construct a new [`Sensor`] with the given parameters.
@@ -402,6 +409,7 @@ impl Sensor {
 			power_state: PowerState::Always,
 			thresholds: ThresholdArr::default(),
 			scale: 1.0,
+			errcount: 0,
 			available,
 			functional,
 			associations,
@@ -506,9 +514,21 @@ impl Sensor {
 					Ok(v) => {
 						let newval = v * sensor.scale;
 						sensor.set_value(newval).await;
+						sensor.errcount = 0;
+						sensor.functional.set(true);
 					},
 					Err(e) => {
-						eprintln!("failed to update {}: {}", sensor.name, e);
+						if sensor.functional.get() {
+							eprintln!("{}: update failed: {}",
+							          sensor.name, e);
+						}
+						sensor.errcount += 1;
+						if sensor.errcount == MAX_ERRORS {
+							eprintln!("{}: error limit exceeded",
+							          sensor.name);
+							sensor.functional.set(false);
+							sensor.set_value(f64::NAN).await;
+						}
 					},
 				};
 

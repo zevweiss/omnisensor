@@ -58,14 +58,18 @@ pub struct FanSensorConfig {
 
 impl FanSensorConfig {
 	/// Construct a [`FanSensorConfig`] from raw dbus config data.
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str,
+	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let index = *prop_get_mandatory(basecfg, "Index")?;
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let power_state = prop_get_default_from(basecfg, "PowerState", PowerState::Always)?;
 		let subtype = prop_get_mandatory_from(basecfg, "Type")?;
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 		let minreading = *prop_get_default(basecfg, "MinReading", &0.0f64)?;
-		let maxreading = *prop_get_default(basecfg, "MaxReading", &25000.0f64)?; // default carried over from dbus-sensors's fansensor
+
+		// default carried over from dbus-sensors's fansensor
+		let maxreading = *prop_get_default(basecfg, "MaxReading", &25000.0f64)?;
+
 		Ok(Self {
 			index,
 			name: name.clone(),
@@ -79,12 +83,14 @@ impl FanSensorConfig {
 }
 
 /// Instantiate any active fan sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) ->ErrResult<()> {
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
+                                 -> ErrResult<()>
+{
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::Fan(fancfg) if dbuspaths.contains(path) => Some((path, fancfg)),
+				SensorConfig::Fan(c) if dbuspaths.contains(path) => Some((path, c)),
 				_ => None,
 			}
 		});
@@ -94,27 +100,35 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	for (path, fancfg) in configs {
 		let mut sensors = daemonstate.sensors.lock().await;
 
-		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, fancfg.name.clone()).await else {
+		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
+		                                                     fancfg.name.clone()).await else {
 			continue;
 		};
 
-		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, fancfg.index, SensorType::RPM,
-								     fancfg.power_state, &None).await {
+		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, fancfg.index,
+		                                                     SensorType::RPM,
+		                                                     fancfg.power_state, &None).await {
 			Ok(Some(ioctx)) => ioctx,
 			Ok(None) => continue,
 			Err(e) => {
-				eprintln!("Error preparing {} from {}: {}", fancfg.name, hwmondir.display(), e);
+				eprintln!("Error preparing {} from {}: {}", fancfg.name,
+				          hwmondir.display(), e);
 				continue;
 			},
 		};
 
-		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
-			Sensor::new(path,&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs, &daemonstate.bus, ReadOnly)
+		let ctor = || {
+			Sensor::new(path,&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs,
+			            &daemonstate.bus, ReadOnly)
 				.with_power_state(fancfg.power_state)
-				.with_thresholds_from(&fancfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
+				.with_thresholds_from(&fancfg.thresholds,
+				                      &daemonstate.sensor_intfs.thresholds,
+				                      &daemonstate.bus)
 				.with_minval(fancfg.minreading)
 				.with_maxval(fancfg.maxreading)
-		}).await;
+		};
+		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx,
+		                            &daemonstate.sensor_intfs, ctor).await;
 	}
 	Ok(())
 }

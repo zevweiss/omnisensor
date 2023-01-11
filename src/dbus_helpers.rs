@@ -23,7 +23,8 @@ pub struct SignalProp<A> {
 
 impl<A: PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	/// Construct a [`SignalProp`] with the given members.
-	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
+	pub fn new(data: A, msgfn: &Arc<PropChgMsgFn>, dbuspath: &Arc<SensorPath>,
+	           conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			data,
 			msgfn: msgfn.clone(),
@@ -61,10 +62,12 @@ impl<A: PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	fn send_propchg(&self) {
 		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &dbus::arg::Variant(&self.data)) {
 			if self.conn.send(msg).is_err() {
-				eprintln!("Failed to send PropertiesChanged message for {:?}", self.dbuspath);
+				eprintln!("Failed to send PropertiesChanged message for {:?}",
+				          self.dbuspath);
 			}
 		} else {
-			eprintln!("Failed to create PropertiesChanged message for {:?}", self.dbuspath);
+			eprintln!("Failed to create PropertiesChanged message for {:?}",
+			          self.dbuspath);
 		}
 	}
 }
@@ -85,7 +88,9 @@ pub mod props {
 	///   * `Ok(Some(_))` if the key is present and the corresponding value is valid.
 	///   * `Ok(None)` if the key is absent.
 	///   * `Err(_)` if the key is present but the value is not a valid `T`.
-	pub fn prop_get_optional<'a, T: 'static>(map: &'a PropMap, key: &str) -> ErrResult<Option<&'a T>> {
+	pub fn prop_get_optional<'a, T: 'static>(map: &'a PropMap, key: &str)
+	                                         -> ErrResult<Option<&'a T>>
+	{
 		let Some(value) = map.get(key) else {
 			return Ok(None);
 		};
@@ -109,7 +114,9 @@ pub mod props {
 
 	/// Like [`prop_get_optional()`], but eliminates the inner [`Option`] by returning
 	/// a provided default value if the key is absent.
-	pub fn prop_get_default<'a, T: 'static>(map: &'a PropMap, key: &str, default: &'a T) -> ErrResult<&'a T> {
+	pub fn prop_get_default<'a, T: 'static>(map: &'a PropMap, key: &str, default: &'a T)
+	                                        -> ErrResult<&'a T>
+	{
 		match prop_get_optional(map, key) {
 			Ok(Some(v)) => Ok(v),
 			Ok(None) => Ok(default),
@@ -146,7 +153,8 @@ pub mod props {
 
 	/// Like [`prop_get_optional_from()`], but eliminates the inner [`Option`] by
 	/// returning a provided default if the key is absent.
-	pub fn prop_get_default_from<'a, I, T>(map: &'a PropMap, key: &str, default: T) -> ErrResult<T>
+	pub fn prop_get_default_from<'a, I, T>(map: &'a PropMap, key: &str, default: T)
+	                                       -> ErrResult<T>
 	where T: TryFrom<&'a I, Error = Box<dyn Error>>, I: 'static
 	{
 		match prop_get_optional::<I>(map, key) {

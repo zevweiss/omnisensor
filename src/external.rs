@@ -50,7 +50,8 @@ pub struct ExternalSensorConfig {
 
 impl ExternalSensorConfig {
 	/// Construct an [`ExternalSensorConfig`] from raw dbus config data.
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str,
+	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let kind: &String = prop_get_mandatory(basecfg, "Units")?;
 		let minvalue = *prop_get_mandatory(basecfg, "MinValue")?;
@@ -144,19 +145,22 @@ async fn get_next_update(extiocore: Arc<Mutex<ExternalSensorIOCore>>, timeout: O
 }
 
 /// Instantiate any active external sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) -> ErrResult<()> {
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
+                                 -> ErrResult<()>
+{
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::External(extcfg) if dbuspaths.contains(path) => Some((path, extcfg)),
+				SensorConfig::External(c) if dbuspaths.contains(path) => Some((path, c)),
 				_ => None,
 			}
 		});
 	for (path, extcfg) in configs {
 		let mut sensors = daemonstate.sensors.lock().await;
 
-		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, extcfg.name.clone()).await else {
+		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
+		                                                     extcfg.name.clone()).await else {
 			continue;
 		};
 
@@ -181,13 +185,18 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			}
 		}));
 
-		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx, &daemonstate.sensor_intfs, || {
-			Sensor::new(path, &extcfg.name, extcfg.kind, &daemonstate.sensor_intfs, &daemonstate.bus, mode)
+		let ctor = || {
+			Sensor::new(path, &extcfg.name, extcfg.kind, &daemonstate.sensor_intfs,
+			            &daemonstate.bus, mode)
 				.with_power_state(extcfg.power_state)
-				.with_thresholds_from(&extcfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
+				.with_thresholds_from(&extcfg.thresholds,
+				                      &daemonstate.sensor_intfs.thresholds,
+				                      &daemonstate.bus)
 				.with_minval(extcfg.minvalue)
 				.with_maxval(extcfg.maxvalue)
-		}).await
+		};
+		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx,
+		                            &daemonstate.sensor_intfs, ctor).await
 	}
 	Ok(())
 }

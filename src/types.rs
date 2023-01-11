@@ -14,35 +14,35 @@ pub type ErrResult<T> = Result<T, Box<dyn Error>>;
 
 /// Internal helper for concisely creating an ErrResult.
 fn mk_err<E>(kind: ErrorKind, err: E) -> Box<dyn Error>
-	where E: Into<Box<dyn Error + Send + Sync>>
+where E: Into<Box<dyn Error + Send + Sync>>
 {
 	Box::new(std::io::Error::new(kind, err))
 }
 
 /// Construct an `Error` of kind `ErrorKind::NotFound` with the given payload.
 pub fn err_not_found<E>(msg: E) -> Box<dyn Error>
-	where E: Into<Box<dyn Error + Send + Sync>>
+where E: Into<Box<dyn Error + Send + Sync>>
 {
 	mk_err(ErrorKind::NotFound, msg)
 }
 
 /// Construct an `Error` of kind `ErrorKind::InvalidData` with the given payload.
 pub fn err_invalid_data<E>(msg: E) -> Box<dyn Error>
-	where E: Into<Box<dyn Error + Send + Sync>>
+where E: Into<Box<dyn Error + Send + Sync>>
 {
 	mk_err(ErrorKind::InvalidData, msg)
 }
 
 /// Construct an `Error` of kind `ErrorKind::Unsupported` with the given payload.
 pub fn err_unsupported<E>(msg: E) -> Box<dyn Error>
-	where E: Into<Box<dyn Error + Send + Sync>>
+where E: Into<Box<dyn Error + Send + Sync>>
 {
 	mk_err(ErrorKind::Unsupported, msg)
 }
 
 /// Construct an `Error` of kind `ErrorKind::Other` with the given payload.
 pub fn err_other<E>(msg: E) -> Box<dyn Error>
-	where E: Into<Box<dyn Error + Send + Sync>>
+where E: Into<Box<dyn Error + Send + Sync>>
 {
 	mk_err(ErrorKind::Other, msg)
 }
@@ -85,7 +85,8 @@ impl<T> From<Option<HashSet<T>>> for FilterSet<T> {
 }
 
 /// Alias for functions for generating dbus `PropertiesChanged` messages.
-pub type PropChgMsgFn = dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg) -> Option<dbus::Message> + Send + Sync;
+pub type PropChgMsgFn = dyn Fn(&dbus::Path<'_>, &dyn dbus::arg::RefArg)
+                               -> Option<dbus::Message> + Send + Sync;
 
 /// A wrapper type for a [`dbus_crossroads`] dbus interface.  The intent is that
 /// `T` is a collection of `PropChgMsgFn`s, one per property of the interface.
@@ -103,12 +104,14 @@ impl<T> SensorIntf<T> {
 	/// are returned in combination with the
 	/// [`token`](dbus_crossroads::IfaceToken) created for the interface.
 	pub fn build<F, I>(cr: &mut dbus_crossroads::Crossroads, intf: I, mkprops: F) -> Self
-	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T, I: Into<dbus::strings::Interface<'static>>
+	where F: FnOnce(&mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>) -> T,
+	      I: Into<dbus::strings::Interface<'static>>
 	{
 		let mut msgfns: Option<T> = None;
-		let token = cr.register(intf, |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
+		let ctor = |b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>| {
 			msgfns = Some(mkprops(b))
-		});
+		};
+		let token = cr.register(intf, ctor);
 
 		Self {
 			token,

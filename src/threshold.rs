@@ -93,7 +93,8 @@ impl TryFrom<&String> for ThresholdBoundType {
 		match s.as_str() {
 			"less than" => Ok(Self::Lower),
 			"greater than" => Ok(Self::Upper),
-			_ => Err(err_invalid_data("Threshold Direction must be \"less than\" or \"greater than\"")),
+			_ => Err(err_invalid_data("Threshold Direction must be \"less than\" or \
+			                           \"greater than\"")),
 		}
 	}
 }
@@ -137,7 +138,9 @@ impl ThresholdConfig {
 
 /// Retrieve as many [`ThresholdConfig`]s as are present in `intfs` for the given base
 /// interface `baseintf`.
-pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> Vec<ThresholdConfig> {
+pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>)
+                             -> Vec<ThresholdConfig>
+{
 	let mut thresholds = vec![];
 	for tidx in 0.. {
 		let intf = format!("{}.Thresholds{}", baseintf, tidx);
@@ -168,7 +171,8 @@ impl ThresholdBound {
 	/// Construct a [`ThresholdBound`] for an object at `dbuspath` using the given
 	/// `msgfns` for generating `PropertiesChanged` signal messages and sending them
 	/// via `conn`.
-	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> Self {
+	fn new(msgfns: &ThresholdBoundIntfMsgFns, dbuspath: &Arc<SensorPath>,
+	       conn: &Arc<SyncConnection>) -> Self {
 		Self {
 			value: SignalProp::new(f64::NAN, &msgfns.value, dbuspath, conn),
 			hysteresis: f64::NAN,
@@ -219,7 +223,9 @@ pub type ThresholdArr = ThresholdSeverityArray<Option<Threshold>>;
 
 /// Construct a [`ThresholdArr`] from a slice of config objects.
 pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &ThresholdIntfDataArr,
-				   dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>) -> ThresholdArr {
+                                   dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>)
+                                   -> ThresholdArr
+{
 	let mut thresholds = ThresholdArr::default();
 	for cfg in cfgs {
 		let intf = &threshold_intfs[cfg.severity as usize];
@@ -238,8 +244,9 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &T
 				return false;
 			}
 			if old.is_finite() {
-				eprintln!("Warning: multiple {:?} {:?} bound {} values specified, overriding {} with {}",
-					  cfg.severity, cfg.kind, name, old, new);
+				eprintln!("Warning: multiple {:?} {:?} bound {} values specified, \
+				           overriding {} with {}",
+				          cfg.severity, cfg.kind, name, old, new);
 			}
 			true
 		};
@@ -257,9 +264,10 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &T
 
 /// Retrieve a threshold property value from the given `sensor` for the given severity
 /// `sev` via `getter`, sending it back over dbus via `ctx`.
-fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, sensor: &Arc<Mutex<Sensor>>, sev: ThresholdSeverity, getter: F)
-			-> impl futures::Future<Output = std::marker::PhantomData<R>>
-	where F: Fn(&Threshold) -> R, R: dbus::arg::Arg + dbus::arg::RefArg + dbus::arg::Append + 'static
+fn get_prop_value<F, R>(mut ctx: dbus_crossroads::PropContext, sensor: &Arc<Mutex<Sensor>>,
+                        sev: ThresholdSeverity, getter: F)
+                        -> impl futures::Future<Output = std::marker::PhantomData<R>>
+where F: Fn(&Threshold) -> R, R: dbus::arg::Arg + dbus::arg::RefArg + dbus::arg::Append + 'static
 {
 	let sensor = sensor.clone();
 	async move {
@@ -279,16 +287,23 @@ struct ThresholdBoundIntfMsgFns {
 
 impl ThresholdBoundIntfMsgFns {
 	/// Construct a [`ThresholdBoundIntfMsgFns`] for the given severity `sev` and bound type `kind`.
-	fn build(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity, kind: ThresholdBoundType) -> Self
+	fn build(b: &mut IfaceBuilder<Arc<Mutex<Sensor>>>, sev: ThresholdSeverity,
+	         kind: ThresholdBoundType) -> Self
 	{
 		let value = b.property(format!("{}{}", sev.to_str(), kind.direction_tag()))
-			.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].value.get()))
+			.get_async(move |ctx, s| {
+				get_prop_value(ctx, s, sev,
+				               move |t| t.bounds[kind as usize].value.get())
+			})
 			.emits_changed_true()
 			.changed_msg_fn()
 			.into();
 
 		let alarm = b.property(format!("{}Alarm{}", sev.to_str(), kind.direction_tag()))
-			.get_async(move |ctx, s| get_prop_value(ctx, s, sev, move |t| t.bounds[kind as usize].alarm.get()))
+			.get_async(move |ctx, s| {
+				get_prop_value(ctx, s, sev,
+				               move |t| t.bounds[kind as usize].alarm.get())
+			})
 			.emits_changed_true()
 			.changed_msg_fn()
 			.into();
@@ -308,12 +323,14 @@ pub struct ThresholdIntfMsgFns {
 impl ThresholdIntfMsgFns {
 	/// Construct a threshold interface for the given severity `sev`.
 	fn build(cr: &mut Crossroads, sev: ThresholdSeverity) -> SensorIntf<Self> {
-		SensorIntf::build(cr, format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str()), |b| {
+		let intfname = format!("xyz.openbmc_project.Sensor.Threshold.{}", sev.to_str());
+		SensorIntf::build(cr, intfname, |b| {
 			let Ok(bounds) = ThresholdBoundType::iter()
 				.map(|t| ThresholdBoundIntfMsgFns::build(b, sev, t))
 				.collect::<Vec<_>>()
 				.try_into() else {
-					panic!("ThresholdBoundType::iter() produced wrong number of elements?");
+					panic!("ThresholdBoundType::iter() produced wrong number \
+					        of elements?");
 				};
 			Self { bounds }
 		})

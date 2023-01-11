@@ -75,16 +75,18 @@ impl BridgeGPIO {
 		};
 
 		// clunk...there's *got* to be a better way of achieving this
-		fn set_sense(builder: &mut gpiocdev::request::Builder, pol: Polarity) -> &mut gpiocdev::request::Builder {
+		fn set_sense(builder: &mut gpiocdev::request::Builder, pol: Polarity)
+		             -> &mut gpiocdev::request::Builder
+		{
 			match pol {
 				Polarity::ActiveHigh => builder.as_active_high(),
 				Polarity::ActiveLow => builder.as_active_low(),
 			}
 		}
 		let req = set_sense(gpiocdev::request::Request::builder()
-				    .with_found_line(&line)
-				    .with_direction(gpiocdev::line::Direction::Output),
-				    cfg.polarity)
+		                    .with_found_line(&line)
+		                    .with_direction(gpiocdev::line::Direction::Output),
+		                    cfg.polarity)
 			.request()?;
 
 		Ok(Self {
@@ -114,7 +116,8 @@ impl BridgeGPIO {
 impl Drop for BridgeGPIOActivation<'_> {
 	/// Resets the associated [`BridgeGPIO`] back to its inactive state.
 	fn drop(&mut self) {
-		if let Err(e) = self.gpio.req.set_value(self.gpio.line.offset, gpiocdev::line::Value::Inactive) {
+		if let Err(e) = self.gpio.req.set_value(self.gpio.line.offset,
+		                                        gpiocdev::line::Value::Inactive) {
 			eprintln!("failed to reset bridge gpio {}: {}", self.gpio.cfg.name, e);
 		}
 		self.gpio.active = false;

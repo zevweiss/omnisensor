@@ -65,7 +65,7 @@ const ENTITY_MANAGER_NAME: &str = "xyz.openbmc_project.EntityManager";
 async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 	let get_objects = |path| async move {
 		let p = nonblock::Proxy::new(ENTITY_MANAGER_NAME, path,
-					     Duration::from_secs(30), bus);
+		                             Duration::from_secs(30), bus);
 		p.get_managed_objects().await
 	};
 
@@ -107,9 +107,11 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 ///
 /// `cb` is passed the signal message, the dbus interface to which it pertains,
 /// and the associated properties.
-async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) -> ErrResult<nonblock::MsgMatch>
-	where H: FnOnce(dbus::message::Message, String, dbus::arg::PropMap) -> R + Send + Copy + Sync + 'static,
-	      R: futures::Future<Output = ()> + Send
+async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H)
+                                                   -> ErrResult<nonblock::MsgMatch>
+where H: FnOnce(dbus::message::Message, String,
+                dbus::arg::PropMap) -> R + Send + Copy + Sync + 'static,
+      R: futures::Future<Output = ()> + Send
 {
 	use dbus::message::SignalArgs;
 	use nonblock::stdintf::org_freedesktop_dbus::PropertiesPropertiesChanged as PPC;
@@ -118,13 +120,15 @@ async fn register_properties_changed_handler<H, R>(bus: &SyncConnection, cb: H) 
 	let rule = MatchRule::new_signal(PPC::INTERFACE, PPC::NAME)
 		.with_namespaced_path("/xyz/openbmc_project/inventory");
 	let (signal, stream) = bus.add_match(rule).await?.stream();
-	let stream = stream.for_each(move |(msg, (intf, props)): (_, (String, dbus::arg::PropMap))| async move {
-		// until dbus-rs supports arg0namespace as a MatchRule
-		// parameter, do it manually here...
-		if !intf.starts_with("xyz.openbmc_project.Configuration.") {
-			return;
+	let stream = stream.for_each(move |(msg, (intf, props)): (_, (String, dbus::arg::PropMap))| {
+		async move {
+			// until dbus-rs supports arg0namespace as a MatchRule
+			// parameter, do it manually here...
+			if !intf.starts_with("xyz.openbmc_project.Configuration.") {
+				return;
+			}
+			tokio::spawn(async move { cb(msg, intf, props).await });
 		}
-		tokio::spawn(async move { cb(msg, intf, props).await });
 	});
 
 	tokio::spawn(async { stream.await });
@@ -187,7 +191,8 @@ async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Messag
 	let newcfg = match get_config(&daemonstate.bus).await {
 		Ok(c) => c,
 		Err(e) => {
-			eprintln!("Failed to retrieve sensor configs, ignoring PropertiesChanged: {}", e);
+			eprintln!("Failed to retrieve sensor configs, ignoring PropertiesChanged: {}",
+			          e);
 			return;
 		},
 	};

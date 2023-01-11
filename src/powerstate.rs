@@ -45,7 +45,8 @@ impl TryFrom<&String> for PowerState {
 			"On" => Ok(Self::On),
 			"BiosPost" => Ok(Self::BiosPost),
 			"ChassisOn" => Ok(Self::ChassisOn),
-			_ => Err(err_invalid_data("PowerState must be \"Always\", \"On\", \"BiosPost\", or \"ChassisOn\"")),
+			_ => Err(err_invalid_data("PowerState must be \"Always\", \"On\", \
+			                           \"BiosPost\", or \"ChassisOn\"")),
 		}
 	}
 }
@@ -111,7 +112,7 @@ pub mod host_state {
 		/// Retrieve the current state of the property represented by `self` from dbus.
 		pub async fn get(&self, bus: &nonblock::SyncConnection) -> ErrResult<bool> {
 			let p = nonblock::Proxy::new(self.busname, self.path,
-						     std::time::Duration::from_secs(30), bus);
+			                             std::time::Duration::from_secs(30), bus);
 			p.get::<String>(self.interface, self.property).await
 				.map(|s| (self.is_active)(&s))
 				.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
@@ -146,6 +147,10 @@ pub mod host_state {
 			update: |s, n| { s.power_on = n; }
 		};
 
+		/// DBus enum string used for matching POST state.
+		const OS_STATUS_INACTIVE: &str =
+			"xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive";
+
 		/// Host POST state.
 		pub const POST: DBusPowerStateProperty = DBusPowerStateProperty {
 			busname: "xyz.openbmc_project.State.OperatingSystem",
@@ -154,7 +159,7 @@ pub mod host_state {
 			property: "OperatingSystemState",
 
 			power_state: PowerState::BiosPost,
-			is_active: |s| s != "Inactive" && s != "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive",
+			is_active: |s| s != "Inactive" && s != OS_STATUS_INACTIVE,
 			update: |s, n| { s.post_complete = n; }
 		};
 	}
@@ -190,7 +195,8 @@ pub mod host_state {
 	/// `cb` will be called with the attribute of power state that changed (again kind of a
 	/// hack datatype-wise, see [`DBusPowerStateProperty::power_state`]) and the new state of
 	/// that attribute (`true` for on, `false` for off).
-	pub async fn register_power_signal_handler<F, R>(bus: &nonblock::SyncConnection, cb: F) -> ErrResult<Vec<nonblock::MsgMatch>>
+	pub async fn register_power_signal_handler<F, R>(bus: &nonblock::SyncConnection, cb: F)
+	                                                 -> ErrResult<Vec<nonblock::MsgMatch>>
 	where F: FnOnce(PowerState, bool) -> R + Send + Copy + Sync + 'static,
 	      R: futures::Future<Output = ()> + Send
 	{
@@ -205,24 +211,30 @@ pub mod host_state {
 			let rule = MatchRule::new_signal(PPC::INTERFACE, PPC::NAME)
 				.with_path(prop.path);
 			let (signal, stream) = bus.add_match(rule).await?.stream();
-			let stream = stream.for_each(move |(_, (intf, props)): (_, (String, dbus::arg::PropMap))| async move {
-				if intf != prop.interface {
-					return; // FIXME: eprintln!()?
+			let handler = move |(_, (intf, props)): (_, (String, dbus::arg::PropMap))| {
+				async move {
+					if intf != prop.interface {
+						return; // FIXME: eprintln!()?
+					}
+
+					let Some(newstate) = dbus::arg::prop_cast::<String>(&props,
+					                                                    prop.property)
+						.map(|s| (prop.is_active)(s)) else {
+							return;
+						};
+
+					{
+						let mut hoststate = HOST_STATE.lock().unwrap();
+						let hoststate = hoststate.deref_mut();
+						(prop.update)(hoststate, newstate);
+					}
+
+					tokio::spawn(async move {
+						cb(prop.power_state, newstate).await
+					});
 				}
-
-				let Some(newstate) = dbus::arg::prop_cast::<String>(&props, prop.property)
-					.map(|s| (prop.is_active)(s)) else {
-						return;
-					};
-
-				{
-					let mut hoststate = HOST_STATE.lock().unwrap();
-					let hoststate = hoststate.deref_mut();
-					(prop.update)(hoststate, newstate);
-				}
-
-				tokio::spawn(async move { cb(prop.power_state, newstate).await });
-			});
+			};
+			let stream = stream.for_each(handler);
 			signals.push(signal);
 			tokio::spawn(async { stream.await });
 		}

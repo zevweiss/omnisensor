@@ -134,7 +134,9 @@ impl HwmonFileInfo {
 /// names start with a certain prefix if `fileprefix` is [`Some`].
 // fileprefix could just be a &str (with "" instead of None), but we might as well make
 // it slightly more explicit.
-pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>) -> ErrResult<Vec<HwmonFileInfo>> {
+pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>)
+                              -> ErrResult<Vec<HwmonFileInfo>>
+{
 	let hwmondir = get_single_hwmon_dir(devdir)?;
 	let pattern = hwmondir.join(format!("{}*_input", fileprefix.unwrap_or("")));
 	let mut info: Vec<_> = glob::glob(&pattern.to_string_lossy())?
@@ -149,7 +151,7 @@ pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>) -> ErrRes
 				},
 				Err(e) => {
 					eprintln!("Warning: error scanning {}, skipping entry: {}",
-						  hwmondir.display(), e);
+					          hwmondir.display(), e);
 					None
 				},
 			}
@@ -167,8 +169,11 @@ pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>) -> ErrRes
 ///
 /// Returns `Ok(None)` if `power_state` is not currently active (in which case there's
 /// nothing further to do), and otherwise `Ok(Some(_))` on success or `Err(_)` on failure.
-pub async fn prepare_indexed_hwmon_ioctx(hwmondir: &Path, idx: u64, kind: SensorType, power_state: PowerState,
-					 bridge_gpio_cfg: &Option<Arc<gpio::BridgeGPIOConfig>>) -> ErrResult<Option<SensorIOCtx>> {
+pub async fn prepare_indexed_hwmon_ioctx(hwmondir: &Path, idx: u64, kind: SensorType,
+                                         power_state: PowerState,
+                                         bridge_gpio_cfg: &Option<Arc<gpio::BridgeGPIOConfig>>)
+                                         -> ErrResult<Option<SensorIOCtx>>
+{
 	if !power_state.active_now() {
 		return Ok(None);
 	}

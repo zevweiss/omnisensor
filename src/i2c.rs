@@ -267,8 +267,10 @@ impl I2CDevice {
 
 		// Try to create it: 'echo $devtype $addr > .../i2c-$bus/new_device'
 		let ctor_path = dev.params.sysfs_bus_dir().join("new_device");
-		let payload = format!("{} {:#02x}\n", dev.params.devtype.kernel_type(), dev.params.address);
-		eprintln!(">>> Instantiating {} at {}", dev.params.devtype.name(), dev.params.sysfs_name());
+		let payload = format!("{} {:#02x}\n", dev.params.devtype.kernel_type(),
+		                      dev.params.address);
+		eprintln!(">>> Instantiating {} at {}", dev.params.devtype.name(),
+		          dev.params.sysfs_name());
 		std::fs::write(&ctor_path, payload)?;
 
 		// Check if that created the requisite sysfs directory
@@ -285,7 +287,8 @@ impl I2CDevice {
 impl Drop for I2CDevice {
 	/// Deletes the I2C device represented by `self` by writing to `delete_device`.
 	fn drop(&mut self) {
-		eprintln!("<<< Deleting {} at {}", self.params.devtype.name(), self.params.sysfs_name());
+		eprintln!("<<< Deleting {} at {}", self.params.devtype.name(),
+		          self.params.sysfs_name());
 		// No params.devicePresent() check on this like in
 		// I2CDevice::new(), since it might be used to clean up after a
 		// device instantiation that was only partially successful
@@ -310,7 +313,9 @@ pub type I2CDeviceMap = HashMap<I2CDeviceParams, std::sync::Weak<I2CDevice>>;
 ///  * `Ok(Some(_))` if an existing device was found or a new one successfully instantiated.
 ///  * `Ok(None)` if the device is static.
 ///  * `Err(_)` on error.
-pub fn get_i2cdev(devmap: &mut I2CDeviceMap, params: &I2CDeviceParams) -> ErrResult<Option<Arc<I2CDevice>>> {
+pub fn get_i2cdev(devmap: &mut I2CDeviceMap, params: &I2CDeviceParams)
+                  -> ErrResult<Option<Arc<I2CDevice>>>
+{
 	let d = devmap.get(params).and_then(|w| w.upgrade());
 	if d.is_some() {
 		Ok(d)

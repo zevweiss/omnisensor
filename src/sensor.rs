@@ -5,7 +5,10 @@ use std::{
 	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
-use dbus::nonblock::SyncConnection;
+use dbus::{
+	arg::{Arg, RefArg, Append, PropMap},
+	nonblock::SyncConnection,
+};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -151,39 +154,50 @@ impl SensorConfig {
 	///  * `Some(Ok(_))`: successful parse.
 	///  * `Some(Err(_))`: we tried to parse a config, but something was wrong with it.
 	///  * `None`: `intf` isn't a sensor configuration, no attempt at parsing.
-	pub fn from_dbus(props: &dbus::arg::PropMap, intf: &str, all_intfs: &HashMap<String, dbus::arg::PropMap>) -> Option<ErrResult<Self>> {
+	pub fn from_dbus(props: &PropMap, intf: &str,
+	                 all_intfs: &HashMap<String, PropMap>) -> Option<ErrResult<Self>> {
 		let parts: Vec<&str> = intf.split('.').collect();
-		if parts.len() != 4 || parts[0] != "xyz" || parts[1] != "openbmc_project" || parts[2] != "Configuration" {
-				return None;
+		if parts.len() != 4
+			|| parts[0] != "xyz"
+			|| parts[1] != "openbmc_project"
+			|| parts[2] != "Configuration"
+		{
+			return None;
 		}
 		let cfgtype = parts[3];
 
 		#[cfg(feature = "adc")]
 		if adc::match_cfgtype(cfgtype) {
-			return Some(adc::ADCSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::ADC));
+			return Some(adc::ADCSensorConfig::from_dbus(props, intf, all_intfs)
+			            .map(SensorConfig::ADC));
 		}
 
 		#[cfg(feature = "hwmon")]
 		if hwmon::match_cfgtype(cfgtype) {
-			return Some(hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Hwmon));
+			return Some(hwmon::HwmonSensorConfig::from_dbus(props, intf, all_intfs)
+			            .map(SensorConfig::Hwmon));
 		}
 
 		#[cfg(feature = "fan")]
 		if fan::match_cfgtype(cfgtype) {
-			return Some(fan::FanSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::Fan));
+			return Some(fan::FanSensorConfig::from_dbus(props, intf, all_intfs)
+			            .map(SensorConfig::Fan));
 		}
 
 		#[cfg(feature = "peci")]
 		if peci::match_cfgtype(cfgtype) {
-			return Some(peci::PECISensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::PECI));
+			return Some(peci::PECISensorConfig::from_dbus(props, intf, all_intfs)
+			            .map(SensorConfig::PECI));
 		}
 
 		#[cfg(feature = "external")]
 		if external::match_cfgtype(cfgtype) {
-			return Some(external::ExternalSensorConfig::from_dbus(props, intf, all_intfs).map(SensorConfig::External));
+			return Some(external::ExternalSensorConfig::from_dbus(props, intf, all_intfs)
+			            .map(SensorConfig::External));
 		}
 
-		return Some(Err(err_unsupported(format!("unsupported Configuration type '{}'", cfgtype))));
+		return Some(Err(err_unsupported(format!("unsupported Configuration type '{}'",
+		                                        cfgtype))));
 	}
 }
 
@@ -342,17 +356,23 @@ impl Sensor {
 	///
 	/// It will initially be disabled (no running I/O task); it can subsequently be
 	/// enabled by a call to its [`activate()`](Sensor::activate) method.
-	pub fn new(cfgpath: &InventoryPath, name: &str, kind: SensorType, intfs: &SensorIntfData, conn: &Arc<SyncConnection>, mode: SensorMode) -> Self {
+	pub fn new(cfgpath: &InventoryPath, name: &str, kind: SensorType,
+	           intfs: &SensorIntfData, conn: &Arc<SyncConnection>, mode: SensorMode) -> Self {
 		let badchar = |c: char| !(c.is_ascii_alphanumeric() || c == '_');
 		let cleanname = name.replace(badchar, "_");
-		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(), cleanname);
+		let dbuspath = format!("/xyz/openbmc_project/sensors/{}/{}", kind.dbus_category(),
+		                       cleanname);
 		let dbuspath = Arc::new(SensorPath(dbuspath.into()));
 		let value_msgfn = &intfs.value_intf(&mode).msgfns.value;
 		let cache = SignalProp::new(f64::NAN, value_msgfn, &dbuspath, conn);
-		let minvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.minvalue, &dbuspath, conn);
-		let maxvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.maxvalue, &dbuspath, conn);
-		let available = SignalProp::new(false, &intfs.availability.msgfns.available, &dbuspath, conn);
-		let functional = SignalProp::new(true, &intfs.opstatus.msgfns.functional, &dbuspath, conn);
+		let minvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.minvalue,
+		                               &dbuspath, conn);
+		let maxvalue = SignalProp::new(f64::NAN, &intfs.value.msgfns.maxvalue,
+		                               &dbuspath, conn);
+		let available = SignalProp::new(false, &intfs.availability.msgfns.available,
+		                                &dbuspath, conn);
+		let functional = SignalProp::new(true, &intfs.opstatus.msgfns.functional,
+		                                 &dbuspath, conn);
 
 		// dbus::strings::Path doesn't have a .parent() method, so momentarily
 		// pretend it's a filesystem path...
@@ -361,12 +381,15 @@ impl Sensor {
 			None => {
 				// Presumably unlikely to ever be hit, but I guess this
 				// seems slightly better than just calling .unwrap()...
-				eprintln!("Warning: bogus-looking config inventory path '{}', faking parent", cfgpath.0);
+				eprintln!("Warning: bogus-looking config inventory path '{}', \
+				           faking parent", cfgpath.0);
 				std::path::Path::new("/xyz/openbmc_project/inventory/system")
 			},
 		};
-		let assoc = ("chassis".to_string(), "all_sensors".to_string(), parentpath.to_string_lossy().into());
-		let associations = SignalProp::new(vec![assoc], &intfs.assoc.msgfns.associations, &dbuspath, conn);
+		let assoc = ("chassis".to_string(), "all_sensors".to_string(),
+		             parentpath.to_string_lossy().into());
+		let associations = SignalProp::new(vec![assoc], &intfs.assoc.msgfns.associations,
+		                                   &dbuspath, conn);
 
 		Self {
 			name: name.into(),
@@ -405,10 +428,10 @@ impl Sensor {
 	/// The thresholds are constructed from the provided config data, interfaces, and
 	/// dbus connection.
 	pub fn with_thresholds_from(mut self, cfg: &[ThresholdConfig],
-				    threshold_intfs: &ThresholdIntfDataArr,
-				    conn: &Arc<SyncConnection>) -> Self {
+	                            threshold_intfs: &ThresholdIntfDataArr,
+	                            conn: &Arc<SyncConnection>) -> Self {
 		self.thresholds = threshold::get_thresholds_from_configs(cfg, threshold_intfs,
-									 &self.dbuspath, conn);
+		                                                         &self.dbuspath, conn);
 		self
 	}
 
@@ -474,7 +497,8 @@ impl Sensor {
 				let mut sensor = sensor.lock().await;
 
 				if sensor.iotask.is_none() {
-					eprintln!("BUG: update task running on inactive sensor {}", sensor.name);
+					eprintln!("BUG: update task running on inactive sensor {}",
+					          sensor.name);
 					break;
 				}
 
@@ -534,7 +558,7 @@ impl Sensor {
 	/// `cbdata` must contain `self`.  (Perhaps this should instead be an associated
 	/// function that just takes that instead of both separately.)
 	pub fn add_to_dbus(&self, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-			   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
+	                   sensor_intfs: &SensorIntfData, cbdata: &Arc<Mutex<Sensor>>)
 	{
 		let mut ifaces = vec![
 			sensor_intfs.value_intf(&self.mode).token,
@@ -560,7 +584,8 @@ pub type SensorMapEntry<'a> = std::collections::hash_map::Entry<'a, String, Arc<
 ///
 /// Returns [`Some`] if there was no previous entry for `key` or if the sensor for `key`
 /// is inactive.  If there is an active sensor for `key`, returns [`None`].
-pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) -> Option<SensorMapEntry<'_>>
+pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String)
+                                        -> Option<SensorMapEntry<'_>>
 {
 	let entry = sensors.entry(key);
 	if let SensorMapEntry::Occupied(ref e) = entry {
@@ -577,9 +602,10 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String) ->
 /// If needed (there's no existing inactive sensor), a new sensor is constructed by
 /// calling `ctor()`, added to dbus, and inserted into `entry`.  In either case, the
 /// sensor is activated with `io` as its I/O context.
-pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<dbus_crossroads::Crossroads>,
-				    io: SensorIOCtx, sensor_intfs: &SensorIntfData, ctor: F)
-	where F: FnOnce() -> Sensor
+pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>,
+                                    cr: &SyncMutex<dbus_crossroads::Crossroads>,
+                                    io: SensorIOCtx, sensor_intfs: &SensorIntfData, ctor: F)
+where F: FnOnce() -> Sensor
 {
 	match entry {
 		SensorMapEntry::Vacant(e) => {
@@ -598,10 +624,11 @@ pub async fn install_or_activate<F>(entry: SensorMapEntry<'_>, cr: &SyncMutex<db
 /// Construct a property for a sensor interface.
 ///
 /// The value will be retrieved by calling `getter()` on the sensor.
-fn build_sensor_property<G, S, V>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>, name: &str, getter: G, setter: Option<S>) -> Box<PropChgMsgFn>
+fn build_sensor_property<G, S, V>(b: &mut dbus_crossroads::IfaceBuilder<Arc<Mutex<Sensor>>>,
+                                  name: &str, getter: G, setter: Option<S>) -> Box<PropChgMsgFn>
 where G: Fn(&Sensor) -> V + Send + Copy + 'static,
       S: Fn(&mut Sensor, V) + Send + Copy + 'static,
-      V: dbus::arg::RefArg + dbus::arg::Arg + dbus::arg::Append + for<'a> dbus::arg::Get<'a> + Send + 'static
+      V: RefArg + Arg + Append + for<'a> dbus::arg::Get<'a> + Send + 'static
 {
 	let pb = b.property(name)
 		.get_async(move |mut ctx, sensor| {
@@ -639,7 +666,9 @@ where G: Fn(&Sensor) -> V + Send + Copy + 'static,
 		pb
 	};
 
-	pb.emits_changed_true() // FIXME: this isn't guaranteed for everything (they're not all SignalProps)
+	// FIXME: they're not all SignalProps, so .emits_changed_true() isn't really
+	// guaranteed for everything
+	pb.emits_changed_true()
 		.changed_msg_fn()
 }
 
@@ -671,7 +700,8 @@ impl ValueIntfMsgFns {
 					match &s.mode {
 						SensorMode::ReadWrite(cb) => cb(s, v),
 						SensorMode::ReadOnly => {
-							eprintln!("BUG: dbus set ReadOnly sensor {}", s.name);
+							eprintln!("BUG: dbus set ReadOnly sensor {}",
+							          s.name);
 						},
 					};
 				})
@@ -679,10 +709,15 @@ impl ValueIntfMsgFns {
 				None
 			};
 			Self {
-				unit: build_sensor_property(b, "Unit", |s| s.kind.dbus_unit_str().to_string(), no_setter::STRING).into(),
-				value: build_sensor_property(b, "Value", |s| s.cache.get(), value_setter).into(),
-				minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get(), no_setter::F64).into(),
-				maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get(), no_setter::F64).into(),
+				unit: build_sensor_property(b, "Unit",
+				                            |s| s.kind.dbus_unit_str().to_string(),
+				                            no_setter::STRING).into(),
+				value: build_sensor_property(b, "Value", |s| s.cache.get(),
+				                             value_setter).into(),
+				minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get(),
+				                                no_setter::F64).into(),
+				maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get(),
+				                                no_setter::F64).into(),
 			}
 		})
 	}
@@ -700,7 +735,8 @@ impl AvailabilityIntfMsgFns {
 	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
 			Self {
-				available: build_sensor_property(b, "Available", |s| s.available.get(), no_setter::BOOL).into(),
+				available: build_sensor_property(b, "Available", |s| s.available.get(),
+				                                 no_setter::BOOL).into(),
 			}
 		})
 	}
@@ -717,7 +753,8 @@ impl OpStatusIntfMsgFns {
 	fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
 			Self {
-				functional: build_sensor_property(b, "Functional", |s| s.functional.get(), no_setter::BOOL).into(),
+				functional: build_sensor_property(b, "Functional", |s| s.functional.get(),
+				                                  no_setter::BOOL).into(),
 			}
 		})
 	}
@@ -733,7 +770,9 @@ impl AssocIntfMsgFns {
 	pub fn build(cr: &mut dbus_crossroads::Crossroads) -> SensorIntf<Self> {
 		SensorIntf::build(cr, "xyz.openbmc_project.Association.Definitions", |b| {
 			Self {
-				associations: build_sensor_property(b, "Associations", |s| { s.associations.get_clone() }, no_setter::ASSOCS).into()
+				associations: build_sensor_property(b, "Associations",
+				                                    |s| { s.associations.get_clone() },
+				                                    no_setter::ASSOCS).into()
 			}
 		})
 	}

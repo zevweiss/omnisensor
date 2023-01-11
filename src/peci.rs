@@ -72,7 +72,8 @@ fn rescan() -> ErrResult<()> {
 
 impl PECISensorConfig {
 	/// Construct a [`PECISensorConfig`] from raw dbus data.
-	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str, intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str,
+	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let cpuid: u64 = *prop_get_mandatory(basecfg, "CpuID")?;
 		let bus: u64 = *prop_get_mandatory(basecfg, "Bus")?;
@@ -82,7 +83,8 @@ impl PECISensorConfig {
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 
 		if !dts_crit_offset.is_finite() {
-			let msg = format!("{}: DtsCritOffset must be finite (got {})", name, dts_crit_offset);
+			let msg = format!("{}: DtsCritOffset must be finite (got {})", name,
+			                  dts_crit_offset);
 			return Err(err_invalid_data(msg));
 		}
 
@@ -98,12 +100,14 @@ impl PECISensorConfig {
 }
 
 /// Instantiate any active PECI sensors configured in `cfgmap`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>) -> ErrResult<()> {
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
+                                 -> ErrResult<()>
+{
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
 		.filter_map(|(path, cfg)| {
 			match cfg {
-				SensorConfig::PECI(pecicfg) if dbuspaths.contains(path) => Some((path, pecicfg)),
+				SensorConfig::PECI(c) if dbuspaths.contains(path) => Some((path, c)),
 				_ => None,
 			}
 		});
@@ -121,11 +125,12 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		// there some better way of finding this path?
 		let devname = format!("{}-{:02x}", pecicfg.bus, pecicfg.address);
 		let sysfs_dir_pat = format!("{}/devices/{}/peci_cpu.cputemp.*.{}", PECI_BUS_DIR,
-					    devname, pecicfg.address);
+		                            devname, pecicfg.address);
 		let devdir = match sysfs::get_single_glob_match(&sysfs_dir_pat) {
 			Ok(d) => d,
 			Err(e) => {
-				eprintln!("Failed to find cputemp subdirectory for PECI device {}: {}", devname, e);
+				eprintln!("Failed to find cputemp subdirectory for PECI device {}: {}",
+				          devname, e);
 				continue;
 			},
 		};
@@ -142,8 +147,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let label = match file.get_label() {
 				Ok(s) => s,
 				Err(e) => {
-					eprintln!("{}: error finding label for {}, skipping entry: {}", pecicfg.name,
-						  file.abspath.display(), e);
+					eprintln!("{}: error finding label for {}, skipping entry: {}",
+					          pecicfg.name, file.abspath.display(), e);
 					continue;
 				},
 			};
@@ -157,27 +162,34 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 			let mut sensors = daemonstate.sensors.lock().await;
 
-			let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors, name.clone()).await else {
+			let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
+			                                                     name.clone()).await else {
 				continue;
 			};
 
 			let io = match sysfs::SysfsSensorIO::new(&file).await {
 				Ok(io) => io,
 				Err(e) => {
-					eprintln!("{}: skipping {}: {}", pecicfg.name, file.abspath.display(), e);
+					eprintln!("{}: skipping {}: {}", pecicfg.name,
+					          file.abspath.display(), e);
 					continue;
 				},
 			};
 
 			let io = SensorIOCtx::new(io);
 
-			sensor::install_or_activate(entry, &daemonstate.crossroads, io, &daemonstate.sensor_intfs, || {
-				Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs, &daemonstate.bus, ReadOnly)
+			let ctor = || {
+				Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,
+				            &daemonstate.bus, ReadOnly)
 					.with_power_state(PowerState::On) // FIXME: make configurable?
-					.with_thresholds_from(&pecicfg.thresholds, &daemonstate.sensor_intfs.thresholds, &daemonstate.bus)
+					.with_thresholds_from(&pecicfg.thresholds,
+					                      &daemonstate.sensor_intfs.thresholds,
+					                      &daemonstate.bus)
 					.with_minval(-128.0)
 					.with_maxval(127.0)
-			}).await;
+			};
+			sensor::install_or_activate(entry, &daemonstate.crossroads, io,
+			                            &daemonstate.sensor_intfs, ctor).await;
 		}
 	}
 

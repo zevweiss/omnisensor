@@ -473,6 +473,11 @@ impl Sensor {
 		}
 	}
 
+	/// Test if the sensor is currently active (updating its reading).
+	fn is_active(&self) -> bool {
+		self.iotask.is_some()
+	}
+
 	/// Start a sensor's update task using the provided `ioctx` and mark it available.
 	///
 	/// This is an associated function rather than a method on `self` because it needs
@@ -504,7 +509,7 @@ impl Sensor {
 
 				let mut sensor = sensor.lock().await;
 
-				if sensor.iotask.is_none() {
+				if !sensor.is_active() {
 					eprintln!("BUG: update task running on inactive sensor {}",
 					          sensor.name);
 					break;
@@ -560,14 +565,13 @@ impl Sensor {
 
 	/// Stop a sensor's update task and mark it unavailable.
 	pub async fn deactivate(&mut self) {
-		let oldiotask = self.iotask.take();
-		if oldiotask.is_none() {
-			eprintln!("BUG: deactivate already-inactive sensor {}", self.name);
+		if !self.is_active() {
+			eprintln!("BUG: deactivating already-inactive sensor {}", self.name);
 		}
 
-		// Could just let this go out of scope, but might as well be explicit
-		// (this is what aborts the update task)
-		drop(oldiotask);
+		// Could just let the old iotask go out of scope, but might as well
+		// explicitly drop it (this is what aborts the update task)
+		drop(self.iotask.take());
 
 		self.set_value(f64::NAN).await;
 		self.available.set(false)
@@ -609,7 +613,7 @@ pub async fn get_nonactive_sensor_entry(sensors: &mut SensorMap, key: String)
 {
 	let entry = sensors.entry(key);
 	if let SensorMapEntry::Occupied(ref e) = entry {
-		if e.get().lock().await.iotask.is_some() {
+		if e.get().lock().await.is_active() {
 			return None;
 		}
 	}
@@ -843,7 +847,7 @@ impl SensorIntfData {
 pub async fn deactivate(sensors: &mut SensorMap) {
 	for sensor in sensors.values_mut() {
 		let sensor = &mut *sensor.lock().await;
-		if sensor.iotask.is_none() { // FIXME: wrap this check or something?
+		if !sensor.is_active() {
 			continue;
 		};
 		if sensor.power_state.active_now() {

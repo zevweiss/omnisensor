@@ -128,7 +128,7 @@ impl HwmonFileInfo {
 	}
 }
 
-/// Scan a device directoy fro hwmon `*_input` files.
+/// Scan a device directory for hwmon `*_input` files.
 ///
 /// Look in `devdir` for hwmon `*_input` files, optionally filtered to just those whose
 /// names start with a certain prefix if `fileprefix` is [`Some`].

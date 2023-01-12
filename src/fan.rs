@@ -82,7 +82,7 @@ impl FanSensorConfig {
 	}
 }
 
-/// Instantiate any active fan sensors configured in `cfgmap`.
+/// Instantiate any active fan sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
                                  -> ErrResult<()>
 {

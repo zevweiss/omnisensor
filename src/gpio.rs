@@ -52,7 +52,7 @@ impl BridgeGPIOConfig {
 	}
 }
 
-/// Represents a GPIO that must be asserted
+/// Represents a GPIO that must be asserted for a sensor to be sampled.
 pub struct BridgeGPIO {
 	line: gpiocdev::FoundLine,
 	cfg: Arc<BridgeGPIOConfig>,

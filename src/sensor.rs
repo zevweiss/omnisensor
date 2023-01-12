@@ -853,7 +853,7 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 	}
 }
 
-/// Instantiate sensors from all backends to match the given `cfg`.
+/// Instantiate sensors from all backends to match `daemonstate.cfg`.
 pub async fn instantiate_all(daemonstate: &DaemonState, filter: &FilterSet<InventoryPath>) {
 	#[cfg(feature = "adc")]
 	adc::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {

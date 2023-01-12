@@ -144,7 +144,7 @@ async fn get_next_update(extiocore: Arc<Mutex<ExternalSensorIOCore>>, timeout: O
 	}
 }
 
-/// Instantiate any active external sensors configured in `cfgmap`.
+/// Instantiate any active external sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
                                  -> ErrResult<()>
 {

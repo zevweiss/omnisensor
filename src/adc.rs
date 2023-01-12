@@ -89,7 +89,7 @@ impl ADCSensorConfig {
 /// The directory where we expect to find the ADC sensor device.
 const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
-/// Instantiate any active ADC sensors configured in `cfgmap`.
+/// Instantiate any active ADC sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
                                  -> ErrResult<()>
 {

@@ -99,7 +99,7 @@ impl PECISensorConfig {
 	}
 }
 
-/// Instantiate any active PECI sensors configured in `cfgmap`.
+/// Instantiate any active PECI sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
                                  -> ErrResult<()>
 {

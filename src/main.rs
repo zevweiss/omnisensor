@@ -155,7 +155,7 @@ pub struct DaemonState {
 /// A helper function for handling dbus `PropertiesChanged` signals.
 async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Message) {
 	#[allow(non_upper_case_globals)]
-	static changed_paths: Mutex<Option<HashSet<InventoryPath>>> = Mutex::const_new(None);
+	static changed_paths: SyncMutex<Option<HashSet<InventoryPath>>> = SyncMutex::new(None);
 
 	let Some(path) = msg.path().map(|p| p.into_static()) else {
 		return;
@@ -163,7 +163,7 @@ async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Messag
 	let path = InventoryPath(path);
 
 	{
-		let mut paths = changed_paths.lock().await;
+		let mut paths = changed_paths.lock().unwrap();
 		if let Some(ref mut set) = &mut *paths {
 			// if it was already Some(_), piggyback on the
 			// signal that set it that way
@@ -177,15 +177,17 @@ async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Messag
 	// Wait for other signals to arrive so we can handle them all as a batch
 	tokio::time::sleep(Duration::from_secs(2)).await;
 
-	let mut paths = changed_paths.lock().await;
+	let filter: FilterSet<_> = {
+		let mut paths = changed_paths.lock().unwrap();
 
-	let filter: FilterSet<_> = if paths.is_some() {
-		paths.take().into()
-	} else {
-		// This should be impossible, but try to lessen the
-		// impact if it somehow happens (instead of .expect()-ing)
-		eprintln!("BUG: changed_paths vanished out from under us!");
-		return;
+		 if paths.is_some() {
+			paths.take().into()
+		} else {
+			// This should be impossible, but try to lessen the
+			// impact if it somehow happens (instead of .expect()-ing)
+			eprintln!("BUG: changed_paths vanished out from under us!");
+			return;
+		}
 	};
 
 	let newcfg = match get_config(&daemonstate.bus).await {

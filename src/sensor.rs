@@ -692,13 +692,13 @@ where G: Fn(&Sensor) -> V + Send + Copy + 'static,
 		.changed_msg_fn()
 }
 
-/// Convenience args for building read-only properties with build_sensor_property()
-mod no_setter {
-	use super::Sensor;
-	pub(super) const F64: Option<fn(&mut Sensor, f64)> = None;
-	pub(super) const STRING: Option<fn(&mut Sensor, String)> = None;
-	pub(super) const BOOL: Option<fn(&mut Sensor, bool)> = None;
-	pub(super) const ASSOCS: Option<fn(&mut Sensor, Vec<(String, String, String)>)> = None;
+/// Helper function for returning a None of a specific type for use as the (absent) setter
+/// to pass to [`build_sensor_property`] for read-only properties.
+///
+/// For reasons that aren't obvious to me the compiler's type inference can't figure out a
+/// bare `None` literal, but is happy with a call to this function instead.
+fn no_setter<T>() -> Option<fn(&mut Sensor, T)> {
+	None
 }
 
 /// A collection of [`PropChgMsgFn`]s for the `xyz.openbmc_project.Sensor.Value`
@@ -731,13 +731,13 @@ impl ValueIntfMsgFns {
 			Self {
 				unit: build_sensor_property(b, "Unit",
 				                            |s| s.kind.dbus_unit_str().to_string(),
-				                            no_setter::STRING).into(),
+				                            no_setter()).into(),
 				value: build_sensor_property(b, "Value", |s| s.cache.get(),
 				                             value_setter).into(),
 				minvalue: build_sensor_property(b, "MinValue", |s| s.minvalue.get(),
-				                                no_setter::F64).into(),
+				                                no_setter()).into(),
 				maxvalue: build_sensor_property(b, "MaxValue", |s| s.maxvalue.get(),
-				                                no_setter::F64).into(),
+				                                no_setter()).into(),
 			}
 		})
 	}
@@ -756,7 +756,7 @@ impl AvailabilityIntfMsgFns {
 		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.Availability", |b| {
 			Self {
 				available: build_sensor_property(b, "Available", |s| s.available.get(),
-				                                 no_setter::BOOL).into(),
+				                                 no_setter()).into(),
 			}
 		})
 	}
@@ -774,7 +774,7 @@ impl OpStatusIntfMsgFns {
 		SensorIntf::build(cr, "xyz.openbmc_project.State.Decorator.OperationalStatus", |b| {
 			Self {
 				functional: build_sensor_property(b, "Functional", |s| s.functional.get(),
-				                                  no_setter::BOOL).into(),
+				                                  no_setter()).into(),
 			}
 		})
 	}
@@ -792,7 +792,7 @@ impl AssocIntfMsgFns {
 			Self {
 				associations: build_sensor_property(b, "Associations",
 				                                    |s| { s.associations.get_clone() },
-				                                    no_setter::ASSOCS).into()
+				                                    no_setter()).into()
 			}
 		})
 	}

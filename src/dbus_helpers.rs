@@ -60,7 +60,7 @@ impl<A: PartialEq + dbus::arg::RefArg> SignalProp<A> {
 
 	/// Emit a `PropertiesChanged` signal to dbus with `self`'s current value.
 	fn send_propchg(&self) {
-		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &dbus::arg::Variant(&self.data)) {
+		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &self.data) {
 			if self.conn.send(msg).is_err() {
 				eprintln!("Failed to send PropertiesChanged message for {:?}",
 				          self.dbuspath);

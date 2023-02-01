@@ -41,8 +41,6 @@ pub struct PECISensorConfig {
 	/// FIXME: Is this used for anything?  Need to figure this out.
 	name: String,
 	/// The ID number of the CPU.
-	///
-	/// FIXME: Is this used for anything?  Need to figure this out.
 	cpuid: u64,
 	/// The PECI bus number of the CPU.
 	bus: u64,
@@ -158,7 +156,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				_ => {},
 			}
 
-			let name = format!("{} {}", label, pecicfg.name);
+			let name = format!("{} CPU{}", label, pecicfg.cpuid);
 
 			let mut sensors = daemonstate.sensors.lock().await;
 

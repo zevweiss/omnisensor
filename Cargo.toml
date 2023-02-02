@@ -22,9 +22,13 @@ strum_macros = "0.24"
 
 [features]
 default = ["hostpower"]
+
+# host power-state monitoring infrastructure (unneeded on hostless platforms)
+hostpower = []
+
+# sensor-type backends
 adc = []
+external = []
+fan = []
 hwmon = []
 peci = []
-fan = []
-external = []
-hostpower = []

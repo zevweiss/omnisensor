@@ -21,7 +21,7 @@ strum = "0.24"
 strum_macros = "0.24"
 
 [features]
-default = ["adc", "hwmon", "hostpower"]
+default = ["hostpower"]
 adc = []
 hwmon = []
 peci = []

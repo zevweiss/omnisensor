@@ -97,6 +97,59 @@ impl PECISensorConfig {
 	}
 }
 
+async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
+                            file: sysfs::HwmonFileInfo, cfg: &PECISensorConfig) -> ErrResult<()>
+{
+
+	let label = match file.get_label() {
+		Ok(s) => s,
+		Err(e) => {
+			let msg = format!("error finding label for {}: {}",
+			                  file.abspath.display(), e);
+			return Err(err_invalid_data(msg));
+		},
+	};
+
+	match label.as_str() {
+		"Tcontrol" | "Tthrottle" | "Tjmax" => return Ok(()),
+		_ => {},
+	}
+
+	let name = format!("{} CPU{}", label, cfg.cpuid);
+
+	let mut sensors = daemonstate.sensors.lock().await;
+
+	let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
+							     name.clone()).await else {
+		return Ok(());
+	};
+
+	let io = match sysfs::SysfsSensorIO::new(&file).await {
+		Ok(io) => sensor::SensorIO::Sysfs(io),
+		Err(e) => {
+			let msg = format!("error opening {}: {}",
+			                  file.abspath.display(), e);
+				return Err(err_other(msg));
+		},
+	};
+
+	let io = SensorIOCtx::new(io);
+
+	let ctor = || {
+		Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,
+			    &daemonstate.bus, ReadOnly)
+			.with_power_state(PowerState::On) // FIXME: make configurable?
+			.with_thresholds_from(&cfg.thresholds,
+					      &daemonstate.sensor_intfs.thresholds,
+					      &daemonstate.bus)
+			.with_minval(-128.0)
+			.with_maxval(127.0)
+	};
+	sensor::install_or_activate(entry, &daemonstate.crossroads, io,
+				    &daemonstate.sensor_intfs, ctor).await;
+	Ok(())
+}
+
 /// Instantiate any active PECI sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
                                  -> ErrResult<()>
@@ -118,76 +171,40 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	}
 
 	for (path, pecicfg) in configs {
-		// Bleh...the only thing we don't know in advance here is the
-		// CPU family (hsx, skx, icx, etc.) matched by the '*'.  Is
-		// there some better way of finding this path?
 		let devname = format!("{}-{:02x}", pecicfg.bus, pecicfg.address);
-		let sysfs_dir_pat = format!("{}/devices/{}/peci_cpu.cputemp.*.{}", PECI_BUS_DIR,
-		                            devname, pecicfg.address);
-		let devdir = match sysfs::get_single_glob_match(&sysfs_dir_pat) {
-			Ok(d) => d,
-			Err(e) => {
-				eprintln!("Failed to find cputemp subdirectory for PECI device {}: {}",
-				          devname, e);
-				continue;
-			},
-		};
+		let devdir = format!("{}/devices/{}", PECI_BUS_DIR, devname);
+		for temptype in &["cputemp", "dimmtemp"] {
+			// Bleh...the only thing we don't know in advance here is the
+			// CPU family (hsx, skx, icx, etc.) matched by the '*'.  Is
+			// there some better way of finding this path?
+			let sysfs_dir_pat = format!("{}/peci_cpu.{}.*.{}", devdir, temptype,
+			                            pecicfg.address);
 
-		let inputs = match sysfs::scan_hwmon_input_files(&devdir, Some("temp")) {
-			Ok(v) => v,
-			Err(e) => {
-				eprintln!("Error finding input files in {}: {}", devdir.display(), e);
-				continue;
-			},
-		};
-
-		for file in inputs {
-			let label = match file.get_label() {
-				Ok(s) => s,
+			let typedir = match sysfs::get_single_glob_match(&sysfs_dir_pat) {
+				Ok(d) => d,
 				Err(e) => {
-					eprintln!("{}: error finding label for {}, skipping entry: {}",
-					          pecicfg.name, file.abspath.display(), e);
+					eprintln!("No {} subdirectory for PECI device {}: {}",
+					          temptype, devname, e);
 					continue;
 				},
 			};
 
-			match label.as_str() {
-				"Tcontrol" | "Tthrottle" | "Tjmax" => continue,
-				_ => {},
+			let inputs = match sysfs::scan_hwmon_input_files(&typedir, Some("temp")) {
+				Ok(v) => v,
+				Err(e) => {
+					eprintln!("Error finding input files in {}: {}",
+					          typedir.display(), e);
+					continue;
+				},
+			};
+
+			for file in inputs {
+				if let Err(e) = instantiate_sensor(daemonstate, path,
+				                                   file, &pecicfg).await {
+					eprintln!("{}: skipping {} entry: {}", path.0,
+					          pecicfg.name, e);
+				}
 			}
-
-			let name = format!("{} CPU{}", label, pecicfg.cpuid);
-
-			let mut sensors = daemonstate.sensors.lock().await;
-
-			let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
-			                                                     name.clone()).await else {
-				continue;
-			};
-
-			let io = match sysfs::SysfsSensorIO::new(&file).await {
-				Ok(io) => sensor::SensorIO::Sysfs(io),
-				Err(e) => {
-					eprintln!("{}: skipping {}: {}", pecicfg.name,
-					          file.abspath.display(), e);
-					continue;
-				},
-			};
-
-			let io = SensorIOCtx::new(io);
-
-			let ctor = || {
-				Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,
-				            &daemonstate.bus, ReadOnly)
-					.with_power_state(PowerState::On) // FIXME: make configurable?
-					.with_thresholds_from(&pecicfg.thresholds,
-					                      &daemonstate.sensor_intfs.thresholds,
-					                      &daemonstate.bus)
-					.with_minval(-128.0)
-					.with_maxval(127.0)
-			};
-			sensor::install_or_activate(entry, &daemonstate.crossroads, io,
-			                            &daemonstate.sensor_intfs, ctor).await;
 		}
 	}
 

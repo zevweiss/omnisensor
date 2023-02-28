@@ -4,6 +4,7 @@
 
 use std::{
 	collections::{HashMap, HashSet},
+	ops::Deref,
 	path::Path,
 };
 
@@ -152,7 +153,7 @@ async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
 
 /// Instantiate any active PECI sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
-                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
+                                 retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
@@ -173,6 +174,18 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	for (path, pecicfg) in configs {
 		let devname = format!("{}-{:02x}", pecicfg.bus, pecicfg.address);
 		let devdir = format!("{}/devices/{}", PECI_BUS_DIR, devname);
+
+		// It seems that the PECI interface isn't always immediately
+		// ready right after host power-on, and sometimes our rescan
+		// attempt hits a little to soon to bring the device online, so
+		// check if devdir is there before trying to proceed (and add it
+		// to the retry set if it's not).
+		if !Path::new(&devdir).exists() {
+			eprintln!("Skipping PECI device {}: no {} directory found", devname, devdir);
+			retry.insert(path.deref().clone());
+			continue;
+		}
+
 		for temptype in &["cputemp", "dimmtemp"] {
 			// Bleh...the only thing we don't know in advance here is the
 			// CPU family (hsx, skx, icx, etc.) matched by the '*'.  Is

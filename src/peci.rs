@@ -164,9 +164,15 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			}
 		});
 
-	// Doing this unconditionally on every update call is perhaps
-	// a little heavy-handed; we could maybe relax things to
-	// trigger it from the power signal handler instead.
+	// If the host's not on, there's not much for PECI to do, so skip the
+	// (potentially slow) rescan and just return.
+	if !PowerState::On.active_now() {
+		return Ok(());
+	}
+
+	// Doing this on every update call as long as the host is on is perhaps
+	// a little heavy-handed; we could maybe relax things to trigger it from
+	// the power signal handler instead.
 	if let Err(e) = rescan() {
 		eprintln!("Warning: PECI rescan failed: {}", e);
 	}

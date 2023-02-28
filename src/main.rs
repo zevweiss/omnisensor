@@ -272,12 +272,9 @@ async fn main() -> ErrResult<()> {
 	}));
 
 	let reply = daemonstate.bus.request_name(DBUS_NAME, false, false, true).await?;
-	match reply {
-		RequestNameReply::PrimaryOwner => (), // OK
-		_ => {
-			let msg = format!("Failed to acquire dbus name {}: {:?}", DBUS_NAME, reply);
-			return Err(err_other(msg));
-		},
+	if reply != RequestNameReply::PrimaryOwner {
+		let msg = format!("Failed to acquire dbus name {}: {:?}", DBUS_NAME, reply);
+		return Err(err_other(msg));
 	}
 
 	println!("Hello, world!");

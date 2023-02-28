@@ -3,7 +3,7 @@
 //! A la dbus-sensors's `adcsensor` daemon.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	sync::Arc,
 	time::Duration,
 };
@@ -90,8 +90,8 @@ impl ADCSensorConfig {
 const IIO_HWMON_PATH: &str = "/sys/devices/platform/iio-hwmon";
 
 /// Instantiate any active ADC sensors configured in `daemonstate.config`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
-                                 -> ErrResult<()>
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
+                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let hwmondir = sysfs::get_single_hwmon_dir(std::path::Path::new(IIO_HWMON_PATH))?;
 	let cfgmap = daemonstate.config.lock().await;

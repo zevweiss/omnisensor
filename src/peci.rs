@@ -3,7 +3,7 @@
 //! A la dbus-sensors's `intelcpusensor` daemon.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	path::Path,
 };
 
@@ -151,8 +151,8 @@ async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
 }
 
 /// Instantiate any active PECI sensors configured in `daemonstate.config`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
-                                 -> ErrResult<()>
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
+                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()

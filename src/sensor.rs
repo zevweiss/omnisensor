@@ -1,7 +1,7 @@
 //! Backend-independent code for implementing and managing sensors.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	sync::{Arc, Mutex as SyncMutex},
 	time::Duration,
 };
@@ -859,28 +859,59 @@ pub async fn deactivate(sensors: &mut SensorMap) {
 
 /// Instantiate sensors from all backends to match `daemonstate.cfg`.
 pub async fn instantiate_all(daemonstate: &DaemonState, filter: &FilterSet<InventoryPath>) {
-	#[cfg(feature = "adc")]
-	adc::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
-		eprintln!("Failed to instantiate ADC sensors: {}", e);
-	});
+	const MAX_ATTEMPTS: usize = 5;
+	const RETRY_WAIT_SECONDS: usize = 3;
 
-	#[cfg(feature = "fan")]
-	fan::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
-		eprintln!("Failed to instantiate fan sensors: {}", e);
-	});
+	let mut filter = filter;
+	let mut retry_filter: FilterSet<InventoryPath>;
+	let mut attempts = 0;
 
-	#[cfg(feature = "peci")]
-	peci::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
-		eprintln!("Failed to instantiate PECI sensors: {}", e);
-	});
+	loop {
+		let mut to_retry = HashSet::new();
 
-	#[cfg(feature = "hwmon")]
-	hwmon::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
-		eprintln!("Failed to instantiate hwmon sensors: {}", e);
-	});
+		#[cfg(feature = "adc")]
+		adc::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
+			eprintln!("Failed to instantiate ADC sensors: {}", e);
+		});
 
-	#[cfg(feature = "external")]
-	external::instantiate_sensors(daemonstate, filter).await.unwrap_or_else(|e| {
-		eprintln!("Failed to instantiate external sensors: {}", e);
-	});
+		#[cfg(feature = "fan")]
+		fan::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
+			eprintln!("Failed to instantiate fan sensors: {}", e);
+		});
+
+		#[cfg(feature = "peci")]
+		peci::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
+			eprintln!("Failed to instantiate PECI sensors: {}", e);
+		});
+
+		#[cfg(feature = "hwmon")]
+		hwmon::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
+			eprintln!("Failed to instantiate hwmon sensors: {}", e);
+		});
+
+		#[cfg(feature = "external")]
+		external::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
+			eprintln!("Failed to instantiate external sensors: {}", e);
+		});
+
+		attempts += 1;
+
+		if to_retry.len() == 0 {
+			if attempts > 1 {
+				eprintln!("All sensors instantiated after {} attempts", attempts);
+			}
+			break;
+		}
+
+		if attempts == MAX_ATTEMPTS {
+			eprintln!("Instantiation failed after {} attempts for: {:?}", attempts, to_retry);
+			break;
+		}
+
+		eprintln!("Waiting {} seconds to retry failed instantiation for: {:?}",
+		          RETRY_WAIT_SECONDS, to_retry);
+		retry_filter = FilterSet::from(Some(to_retry));
+		filter = &retry_filter;
+		tokio::time::sleep(Duration::from_secs(3)).await;
+	}
 }

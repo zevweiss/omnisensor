@@ -122,7 +122,7 @@ impl<T> SensorIntf<T> {
 
 /// A newtype for a dbus path to reduce the likelihood of mixing up inventory
 /// paths and sensor paths.
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InventoryPath(pub dbus::Path<'static>);
 
 /// A newtype for a dbus path to reduce the likelihood of mixing up inventory

@@ -152,8 +152,8 @@ fn name_for_label(label: &str) -> &str {
 }
 
 /// Instantiate any active PMBus/I2C hwmon sensors configured in `daemonstate.config`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
-                                 ->ErrResult<()>
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
+                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()

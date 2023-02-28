@@ -3,7 +3,7 @@
 //! A la dbus-sensors's `externalsensor` daemon.
 
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	sync::Arc,
 	time::Duration,
 };
@@ -145,8 +145,8 @@ async fn get_next_update(extiocore: Arc<Mutex<ExternalSensorIOCore>>, timeout: O
 }
 
 /// Instantiate any active external sensors configured in `daemonstate.config`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
-                                 -> ErrResult<()>
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
+                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()

@@ -2,7 +2,7 @@
 //!
 //! A la dbus-sensors's `fansensor` daemon.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
 	DaemonState,
@@ -83,8 +83,8 @@ impl FanSensorConfig {
 }
 
 /// Instantiate any active fan sensors configured in `daemonstate.config`.
-pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>)
-                                 -> ErrResult<()>
+pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
+                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()

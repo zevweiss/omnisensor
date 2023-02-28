@@ -5,6 +5,7 @@
 
 use std::{
 	collections::{HashMap, HashSet},
+	ops::Deref,
 	time::Duration,
 };
 use dbus::arg::RefArg;
@@ -153,7 +154,7 @@ fn name_for_label(label: &str) -> &str {
 
 /// Instantiate any active PMBus/I2C hwmon sensors configured in `daemonstate.config`.
 pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSet<InventoryPath>,
-                                 _retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
+                                 retry: &mut HashSet<InventoryPath>) -> ErrResult<()>
 {
 	let cfgmap = daemonstate.config.lock().await;
 	let configs = cfgmap.iter()
@@ -177,8 +178,9 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			match get_i2cdev(&mut i2cdevs, &hwmcfg.i2c) {
 				Ok(d) => d,
 				Err(e) => {
-					eprintln!("{}: i2c device instantiation failed, skipping: {}",
+					eprintln!("{}: i2c device instantiation failed: {}",
 					          mainname, e);
+					retry.insert(path.deref().clone());
 					continue;
 				},
 			}

@@ -121,7 +121,7 @@ impl ThresholdConfig {
 		let kind = prop_get_mandatory_from(props, "Direction")?;
 		let severity = prop_get_mandatory_from(props, "Severity")?;
 		let value = *prop_get_mandatory::<f64>(props, "Value")?;
-		let hysteresis = *prop_get_default::<f64>(props, "Hysteresis", &f64::NAN)?;
+		let hysteresis = *prop_get_default::<f64>(props, "Hysteresis", &0.0f64)?;
 
 		if !value.is_finite() {
 			return Err(err_invalid_data("Threshold value must be finite"));

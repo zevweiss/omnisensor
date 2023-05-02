@@ -184,6 +184,7 @@ impl ThresholdBound {
 	/// value from the sensor.
 	fn update(&mut self, kind: ThresholdBoundType, sample: f64) {
 		if !sample.is_finite() || !self.value.get().is_finite() {
+			self.alarm.set(false);
 			return;
 		}
 

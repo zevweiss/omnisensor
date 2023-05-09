@@ -29,7 +29,7 @@ use tokio::sync::Mutex;
 mod types;
 mod sensor;
 mod backends;
-mod i2c;
+mod devices;
 mod gpio;
 mod powerstate;
 mod sysfs;
@@ -134,7 +134,7 @@ pub struct DaemonState {
 	/// All extant sensors, by name (active and inactive alike).
 	sensors: Mutex<SensorMap>,
 	/// All managed (dynamic) I2C devices.
-	i2cdevs: Mutex<i2c::I2CDeviceMap>,
+	i2cdevs: Mutex<devices::I2CDeviceMap>,
 	/// Our dbus connection.
 	bus: Arc<SyncConnection>,
 	/// dbus object server registry...thing.
@@ -225,7 +225,7 @@ async fn main() -> ErrResult<()> {
 	let daemonstate = DaemonState {
 		config: Mutex::new(cfg),
 		sensors: Mutex::new(SensorMap::new()),
-		i2cdevs: Mutex::new(i2c::I2CDeviceMap::new()),
+		i2cdevs: Mutex::new(devices::I2CDeviceMap::new()),
 		bus,
 		crossroads: SyncMutex::new(cr),
 		sensor_intfs,

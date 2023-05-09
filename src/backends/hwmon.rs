@@ -13,7 +13,7 @@ use dbus::arg::RefArg;
 use crate::{
 	DaemonState,
 	types::*,
-	i2c::{
+	devices::{
 		I2CDeviceParams,
 		I2CDeviceType,
 		get_device_type,

@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use crate::{
 	DaemonState,
 	types::*,
-	i2c::I2CDevice,
+	devices::I2CDevice,
 	gpio::BridgeGPIO,
 	powerstate::PowerState,
 	sysfs,

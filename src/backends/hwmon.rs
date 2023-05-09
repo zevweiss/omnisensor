@@ -14,10 +14,12 @@ use crate::{
 	DaemonState,
 	types::*,
 	devices::{
-		I2CDeviceParams,
-		I2CDeviceType,
-		get_device_type,
-		get_i2cdev,
+		i2c::{
+			I2CDeviceParams,
+			I2CDeviceType,
+			get_device_type,
+			get_i2cdev,
+		},
 	},
 	powerstate::PowerState,
 	sensor,

@@ -5,11 +5,18 @@
 use std::{
 	collections::{HashMap, HashSet},
 	ops::Deref,
-	path::Path,
+	sync::Arc,
 };
 
 use crate::{
 	DaemonState,
+	devices::{
+		PhysicalDevice,
+		peci::{
+			PECIDeviceParams,
+			get_pecidev,
+		},
+	},
 	powerstate::PowerState,
 	sensor,
 	sensor::{
@@ -43,10 +50,8 @@ pub struct PECISensorConfig {
 	name: String,
 	/// The ID number of the CPU.
 	cpuid: u64,
-	/// The PECI bus number of the CPU.
-	bus: u64,
-	/// The PECI address of the CPU.
-	address: u64,
+	/// The PECI bus parameters (bus number and address) of the CPU.
+	params: PECIDeviceParams,
 	/// The DTS critical offset if provided, 0.0 by default.
 	///
 	/// This is used as a threshold hysteresis value that optionally overrides what
@@ -59,24 +64,13 @@ pub struct PECISensorConfig {
 	thresholds: Vec<threshold::ThresholdConfig>,
 }
 
-/// The top-level sysfs directory via which we interact with the kernel's PECI subsystem.
-const PECI_BUS_DIR: &str = "/sys/bus/peci";
-
-/// The kernel PECI subsystem doesn't expose a sysfs interface to instantiate a device for
-/// a given bus/address; it simply allows triggering a global rescan operation, so this
-/// isn't tied to any particular device.
-fn rescan() -> ErrResult<()> {
-	Ok(std::fs::write(Path::new(PECI_BUS_DIR).join("rescan"), "1")?)
-}
-
 impl PECISensorConfig {
 	/// Construct a [`PECISensorConfig`] from raw dbus data.
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str,
 	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let cpuid: u64 = *prop_get_mandatory(basecfg, "CpuID")?;
-		let bus: u64 = *prop_get_mandatory(basecfg, "Bus")?;
-		let address: u64 = *prop_get_mandatory(basecfg, "Address")?;
+		let params = PECIDeviceParams::from_dbus(basecfg)?;
 		let dts_crit_offset = *prop_get_default(basecfg, "DtsCritOffset", &0.0f64)?;
 
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
@@ -90,8 +84,7 @@ impl PECISensorConfig {
 		Ok(Self {
 			name: name.clone(),
 			cpuid,
-			bus,
-			address,
+			params,
 			dts_crit_offset,
 			thresholds,
 		})
@@ -99,7 +92,8 @@ impl PECISensorConfig {
 }
 
 async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
-                            file: sysfs::HwmonFileInfo, cfg: &PECISensorConfig) -> ErrResult<()>
+                            file: sysfs::HwmonFileInfo, cfg: &PECISensorConfig,
+                            physdev: &Arc<PhysicalDevice>) -> ErrResult<()>
 {
 
 	let label = match file.get_label() {
@@ -134,7 +128,7 @@ async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
 		},
 	};
 
-	let io = SensorIOCtx::new(io);
+	let io = SensorIOCtx::new(io).with_physdev(Some(physdev.clone()));
 
 	let ctor = || {
 		Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,
@@ -170,40 +164,35 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		return Ok(());
 	}
 
-	// Doing this on every update call as long as the host is on is perhaps
-	// a little heavy-handed; we could maybe relax things to trigger it from
-	// the power signal handler instead.
-	if let Err(e) = rescan() {
-		eprintln!("Warning: PECI rescan failed: {}", e);
-	}
-
 	for (path, pecicfg) in configs {
-		let devname = format!("{}-{:02x}", pecicfg.bus, pecicfg.address);
-		let devdir = format!("{}/devices/{}", PECI_BUS_DIR, devname);
+		let params = &pecicfg.params;
+		let devdir = params.sysfs_device_dir();
 
-		// It seems that the PECI interface isn't always immediately
-		// ready right after host power-on, and sometimes our rescan
-		// attempt hits a little to soon to bring the device online, so
-		// check if devdir is there before trying to proceed (and add it
-		// to the retry set if it's not).
-		if !Path::new(&devdir).exists() {
-			eprintln!("Skipping PECI device {}: no {} directory found", devname, devdir);
-			retry.insert(path.deref().clone());
-			continue;
-		}
+		let physdev = {
+			let mut physdevs = daemonstate.physdevs.lock().await;
+			match get_pecidev(&mut physdevs, params) {
+				Ok(d) => d,
+				Err(e) => {
+					eprintln!("{}: PECI device not found: {}",
+					          params.sysfs_name(), e);
+					retry.insert(path.deref().clone());
+					continue;
+				},
+			}
+		};
 
 		for temptype in &["cputemp", "dimmtemp"] {
 			// Bleh...the only thing we don't know in advance here is the
 			// CPU family (hsx, skx, icx, etc.) matched by the '*'.  Is
 			// there some better way of finding this path?
-			let sysfs_dir_pat = format!("{}/peci_cpu.{}.*.{}", devdir, temptype,
-			                            pecicfg.address);
+			let sysfs_dir_pat = format!("{}/peci_cpu.{}.*.{}", devdir.display(),
+			                            temptype, params.address);
 
 			let typedir = match sysfs::get_single_glob_match(&sysfs_dir_pat) {
 				Ok(d) => d,
 				Err(e) => {
 					eprintln!("No {} subdirectory for PECI device {}: {}",
-					          temptype, devname, e);
+					          temptype, params.sysfs_name(), e);
 					continue;
 				},
 			};
@@ -219,7 +208,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 			for file in inputs {
 				if let Err(e) = instantiate_sensor(daemonstate, path,
-				                                   file, &pecicfg).await {
+				                                   file, &pecicfg, &physdev).await {
 					eprintln!("{}: skipping {} entry: {}", path.0,
 					          pecicfg.name, e);
 				}

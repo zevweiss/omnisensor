@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use crate::{
 	DaemonState,
 	types::*,
-	devices::i2c::I2CDevice,
+	devices::PhysicalDevice,
 	gpio::BridgeGPIO,
 	powerstate::PowerState,
 	sysfs,
@@ -235,8 +235,8 @@ pub struct SensorIOCtx {
 	io: SensorIO,
 	/// A GPIO that must be asserted before reading the sensor.
 	bridge_gpio: Option<BridgeGPIO>,
-	/// A reference to an I2C device associated with the sensor.
-	i2cdev: Option<Arc<I2CDevice>>,
+	/// A reference to physical device associated with the sensor.
+	physdev: Option<Arc<PhysicalDevice>>,
 	/// Function returning a future to await before performing an update of the sensor's value.
 	next_update: NextUpdateFn,
 }
@@ -259,7 +259,7 @@ impl SensorIOCtx {
 		Self {
 			io,
 			bridge_gpio: None,
-			i2cdev: None,
+			physdev: None,
 			next_update: Box::new(|s| Box::pin(tokio::time::sleep(s.poll_interval))),
 		}
 	}
@@ -270,9 +270,9 @@ impl SensorIOCtx {
 		self
 	}
 
-	/// Add an [`I2CDevice`] to a sensor I/O context.
-	pub fn with_i2cdev(mut self, i2cdev: Option<Arc<I2CDevice>>) -> Self {
-		self.i2cdev = i2cdev;
+	/// Add a [`PhysicalDevice`] to a sensor I/O context.
+	pub fn with_physdev(mut self, physdev: Option<Arc<PhysicalDevice>>) -> Self {
+		self.physdev = physdev;
 		self
 	}
 

@@ -13,13 +13,11 @@ use dbus::arg::RefArg;
 use crate::{
 	DaemonState,
 	types::*,
-	devices::{
-		i2c::{
-			I2CDeviceParams,
-			I2CDeviceType,
-			get_device_type,
-			get_i2cdev,
-		},
+	devices::i2c::{
+		I2CDeviceParams,
+		I2CDeviceType,
+		get_device_type,
+		get_i2cdev,
 	},
 	powerstate::PowerState,
 	sensor,
@@ -175,9 +173,9 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			continue;
 		}
 
-		let i2cdev = {
-			let mut i2cdevs = daemonstate.i2cdevs.lock().await;
-			match get_i2cdev(&mut i2cdevs, &hwmcfg.i2c) {
+		let physdev = {
+			let mut physdevs = daemonstate.physdevs.lock().await;
+			match get_i2cdev(&mut physdevs, &hwmcfg.i2c) {
 				Ok(d) => d,
 				Err(e) => {
 					eprintln!("{}: i2c device instantiation failed: {}",
@@ -248,7 +246,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				SensorType::Power => (0.0, 3000.0),
 			};
 
-			let io = SensorIOCtx::new(io).with_i2cdev(i2cdev.clone());
+			let io = SensorIOCtx::new(io).with_physdev(physdev.clone());
 
 			let ctor = || {
 				Sensor::new(path, &sensorname, file.kind, &daemonstate.sensor_intfs,

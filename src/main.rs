@@ -45,7 +45,7 @@ use sensor::{
 	SensorIntfData,
 	SensorMap,
 };
-use devices::i2c::I2CDeviceMap;
+use devices::PhysicalDeviceMap;
 
 /// The dbus name claimed by the daemon.
 const DBUS_NAME: &str = "xyz.openbmc_project.OmniSensor";
@@ -134,8 +134,8 @@ pub struct DaemonState {
 	config: Mutex<SensorConfigMap>,
 	/// All extant sensors, by name (active and inactive alike).
 	sensors: Mutex<SensorMap>,
-	/// All managed (dynamic) I2C devices.
-	i2cdevs: Mutex<I2CDeviceMap>,
+	/// All managed (dynamic) physical devices.
+	physdevs: Mutex<PhysicalDeviceMap>,
 	/// Our dbus connection.
 	bus: Arc<SyncConnection>,
 	/// dbus object server registry...thing.
@@ -226,7 +226,7 @@ async fn main() -> ErrResult<()> {
 	let daemonstate = DaemonState {
 		config: Mutex::new(cfg),
 		sensors: Mutex::new(SensorMap::new()),
-		i2cdevs: Mutex::new(I2CDeviceMap::new()),
+		physdevs: Mutex::new(PhysicalDeviceMap::new()),
 		bus,
 		crossroads: SyncMutex::new(cr),
 		sensor_intfs,

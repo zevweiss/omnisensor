@@ -1,7 +1,6 @@
 //! Abstractions for managing I2C devices.
 
 use std::{
-	collections::HashMap,
 	path::{Path, PathBuf},
 	sync::Arc,
 };
@@ -10,6 +9,11 @@ use phf::{phf_map, phf_set};
 use crate::{
 	types::*,
 	dbus_helpers::props::*,
+};
+
+use super::{
+	PhysicalDevice,
+	PhysicalDeviceMap,
 };
 
 /// A map of supported I2C device types.
@@ -226,7 +230,7 @@ impl I2CDeviceParams {
 	///  * `Ok(Some(_))` on success (an [`I2CDevice`] that will remove the device when
 	///    the last reference to it is dropped).
 	///  * `Err(_)` on error.
-	fn instantiate_device(&self) -> ErrResult<Option<Arc<I2CDevice>>> {
+	fn instantiate_device(&self) -> ErrResult<Option<Arc<PhysicalDevice>>> {
 		if self.device_static() {
 			Ok(None)
 		} else {
@@ -242,7 +246,8 @@ impl I2CDeviceParams {
 			if self.device_present() {
 				drop(I2CDevice::new(self.clone()));
 			}
-			I2CDevice::new(self.clone()).map(|d| Some(Arc::new(d)))
+			let physdev = PhysicalDevice::I2C(I2CDevice::new(self.clone())?);
+			Ok(Some(Arc::new(physdev)))
 		}
 	}
 }
@@ -298,27 +303,22 @@ impl Drop for I2CDevice {
 	}
 }
 
-/// Lookup table for finding I2CDevices.  Weak<_> because we only want them kept alive by
-/// (strong, Arc<_>) references from Sensors so they get dropped when the last sensor
-/// using them goes away.
-pub type I2CDeviceMap = HashMap<I2CDeviceParams, std::sync::Weak<I2CDevice>>;
-
-/// Find an existing [`I2CDevice`] in `devmap` for the given `params`, or instantiate one
-/// and add it to `devmap` if not.  Returns:
+/// Find an existing I2C [`PhysicalDevice`] in `devmap` for the given `params`, or
+/// instantiate one and add it to `devmap` if not.  Returns:
 ///
 ///  * `Ok(Some(_))` if an existing device was found or a new one successfully instantiated.
 ///  * `Ok(None)` if the device is static.
 ///  * `Err(_)` on error.
-pub fn get_i2cdev(devmap: &mut I2CDeviceMap, params: &I2CDeviceParams)
-                  -> ErrResult<Option<Arc<I2CDevice>>>
+pub fn get_i2cdev(devmap: &mut PhysicalDeviceMap, params: &I2CDeviceParams)
+                  -> ErrResult<Option<Arc<PhysicalDevice>>>
 {
-	let d = devmap.get(params).and_then(|w| w.upgrade());
+	let d = devmap.i2c.get(params).and_then(|w| w.upgrade());
 	if d.is_some() {
 		Ok(d)
 	} else {
 		let dev = params.instantiate_device()?;
 		if let Some(ref d) = dev {
-			devmap.insert(params.clone(), Arc::downgrade(d));
+			devmap.i2c.insert(params.clone(), Arc::downgrade(d));
 		}
 		Ok(dev)
 	}

@@ -28,16 +28,7 @@ use tokio::sync::Mutex;
 
 mod types;
 mod sensor;
-#[cfg(feature = "adc")]
-mod adc;
-#[cfg(feature = "fan")]
-mod fan;
-#[cfg(feature = "hwmon")]
-mod hwmon;
-#[cfg(feature = "peci")]
-mod peci;
-#[cfg(feature = "external")]
-mod external;
+mod backends;
 mod i2c;
 mod gpio;
 mod powerstate;

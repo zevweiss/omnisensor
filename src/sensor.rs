@@ -28,19 +28,19 @@ use crate::{
 };
 
 #[cfg(feature = "adc")]
-use crate::adc;
+use crate::backends::adc;
 
 #[cfg(feature = "hwmon")]
-use crate::hwmon;
+use crate::backends::hwmon;
 
 #[cfg(feature = "fan")]
-use crate::fan;
+use crate::backends::fan;
 
 #[cfg(feature = "peci")]
-use crate::peci;
+use crate::backends::peci;
 
 #[cfg(feature = "external")]
-use crate::external;
+use crate::backends::external;
 
 /// The type of a sensor.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]

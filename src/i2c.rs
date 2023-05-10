@@ -226,7 +226,7 @@ impl I2CDeviceParams {
 	///  * `Ok(Some(_))` on success (an [`I2CDevice`] that will remove the device when
 	///    the last reference to it is dropped).
 	///  * `Err(_)` on error.
-	pub fn instantiate_device(&self) -> ErrResult<Option<Arc<I2CDevice>>> {
+	fn instantiate_device(&self) -> ErrResult<Option<Arc<I2CDevice>>> {
 		if self.device_static() {
 			Ok(None)
 		} else {
@@ -258,7 +258,7 @@ pub struct I2CDevice {
 
 impl I2CDevice {
 	/// Instantiate an [`I2CDevice`] from an [`I2CDeviceParams`].
-	pub fn new(params: I2CDeviceParams) -> ErrResult<Self> {
+	fn new(params: I2CDeviceParams) -> ErrResult<Self> {
 		// If it's already instantiated, there's nothing we need to do.
 		let dev = Self { params };
 		if dev.params.device_present() {

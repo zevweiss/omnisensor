@@ -485,6 +485,7 @@ dependencies = [
  "futures",
  "glob",
  "gpiocdev",
+ "log",
  "phf",
  "strum",
  "strum_macros",

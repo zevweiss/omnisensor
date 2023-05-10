@@ -7,6 +7,7 @@ use std::{
 	ops::Deref,
 	sync::Arc,
 };
+use log::error;
 
 use crate::{
 	DaemonState,
@@ -176,8 +177,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			match get_pecidev(&mut physdevs, params) {
 				Ok(d) => d,
 				Err(e) => {
-					eprintln!("{}: PECI device not found: {}",
-					          params.sysfs_name(), e);
+					error!("{}: PECI device not found: {}",
+					       params.sysfs_name(), e);
 					retry.insert(path.deref().clone());
 					continue;
 				},
@@ -194,8 +195,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let typedir = match sysfs::get_single_glob_match(&sysfs_dir_pat) {
 				Ok(d) => d,
 				Err(e) => {
-					eprintln!("No {} subdirectory for PECI device {}: {}",
-					          temptype, params.sysfs_name(), e);
+					error!("No {} subdirectory for PECI device {}: {}",
+					       temptype, params.sysfs_name(), e);
 					continue;
 				},
 			};
@@ -203,8 +204,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let inputs = match sysfs::scan_hwmon_input_files(&typedir, Some("temp")) {
 				Ok(v) => v,
 				Err(e) => {
-					eprintln!("Error finding input files in {}: {}",
-					          typedir.display(), e);
+					error!("Error finding input files in {}: {}",
+					       typedir.display(), e);
 					continue;
 				},
 			};
@@ -212,8 +213,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			for file in inputs {
 				if let Err(e) = instantiate_sensor(daemonstate, path,
 				                                   file, pecicfg, &physdev).await {
-					eprintln!("{}: skipping {} entry: {}", path.0,
-					          pecicfg.name, e);
+					error!("{}: skipping {} entry: {}", path.0,
+					       pecicfg.name, e);
 				}
 			}
 		}

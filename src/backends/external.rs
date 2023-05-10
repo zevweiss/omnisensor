@@ -12,6 +12,7 @@ use tokio::sync::{
 	Mutex,
 	watch,
 };
+use log::error;
 
 use crate::{
 	DaemonState,
@@ -138,7 +139,7 @@ async fn get_next_update(extiocore: Arc<Mutex<ExternalSensorIOCore>>, timeout: O
 		let res = update.await;
 		if let Err(e) = res {
 			// FIXME: would be nice to include the sensor name here
-			eprintln!("BUG: failed to receive value update: {}", e);
+			error!("BUG: failed to receive value update: {}", e);
 			extiocore.stale = true;
 		}
 	}
@@ -181,7 +182,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 		let mode = ReadWrite(Box::new(move |s, v| {
 			if let Err(e) = tx.send(v) {
-				eprintln!("{}: failed to send value update: {}", s.name, e);
+				error!("{}: failed to send value update: {}", s.name, e);
 			}
 		}));
 

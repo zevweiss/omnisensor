@@ -1,6 +1,7 @@
 //! Abstractions for handling GPIO lines associated with sensors.
 
 use std::{sync::Arc, time::Duration};
+use log::error;
 
 use crate::{
 	dbus_helpers::props::*,
@@ -70,7 +71,7 @@ impl BridgeGPIO {
 	/// Construct a [`BridgeGPIO`] from a [`BridgeGPIOConfig`]
 	pub fn from_config(cfg: Arc<BridgeGPIOConfig>) -> ErrResult<Self> {
 		let Some(line) = gpiocdev::find_named_line(&cfg.name) else {
-			eprintln!("failed to find bridge GPIO {}", cfg.name);
+			error!("failed to find bridge GPIO {}", cfg.name);
 			return Err(err_not_found("GPIO not found"));
 		};
 
@@ -118,7 +119,7 @@ impl Drop for BridgeGPIOActivation<'_> {
 	fn drop(&mut self) {
 		if let Err(e) = self.gpio.req.set_value(self.gpio.line.offset,
 		                                        gpiocdev::line::Value::Inactive) {
-			eprintln!("failed to reset bridge gpio {}: {}", self.gpio.cfg.name, e);
+			error!("failed to reset bridge gpio {}: {}", self.gpio.cfg.name, e);
 		}
 		self.gpio.active = false;
 	}

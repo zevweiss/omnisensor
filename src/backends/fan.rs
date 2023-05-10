@@ -3,6 +3,7 @@
 //! A la dbus-sensors's `fansensor` daemon.
 
 use std::collections::{HashMap, HashSet};
+use log::error;
 
 use crate::{
 	DaemonState,
@@ -111,8 +112,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			Ok(Some(ioctx)) => ioctx,
 			Ok(None) => continue,
 			Err(e) => {
-				eprintln!("Error preparing {} from {}: {}", fancfg.name,
-				          hwmondir.display(), e);
+				error!("Error preparing {} from {}: {}", fancfg.name,
+				       hwmondir.display(), e);
 				continue;
 			},
 		};

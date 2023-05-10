@@ -1,6 +1,7 @@
 //! Utility code for sensor power-state attributes and host power state monitoring.
 
 use crate::types::*;
+use log::error;
 
 /// Represents a setting of a sensor indicating in which host power states it is enabled.
 #[derive(Debug, Copy, Clone)]
@@ -174,7 +175,7 @@ pub mod host_state {
 
 		let retrieve = |res: ErrResult<bool>, name| {
 			res.unwrap_or_else(|e| {
-				eprintln!("Failed to retrieve {} status from dbus: {}", name, e);
+				error!("Failed to retrieve {} status from dbus: {}", name, e);
 				false // on error, assume things are off.
 			})
 		};
@@ -214,7 +215,7 @@ pub mod host_state {
 			let handler = move |(_, (intf, props)): (_, (String, dbus::arg::PropMap))| {
 				async move {
 					if intf != prop.interface {
-						return; // FIXME: eprintln!()?
+						return; // FIXME: log?
 					}
 
 					let Some(newstate) = dbus::arg::prop_cast::<String>(&props,

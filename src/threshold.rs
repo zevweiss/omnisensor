@@ -13,6 +13,7 @@ use dbus_crossroads::{
 };
 use strum::{EnumCount as _EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
+use log::{warn, error};
 
 use crate::{
 	sensor::Sensor,
@@ -150,7 +151,7 @@ pub fn get_configs_from_dbus(baseintf: &str, intfs: &HashMap<String, dbus::arg::
 		match ThresholdConfig::from_dbus(props) {
 			Ok(thr) => thresholds.push(thr),
 			Err(e) => {
-				eprintln!("Error: invalid threshold config {}: {}", intf, e);
+				error!("Invalid threshold config {}: {}", intf, e);
 			},
 		}
 	}
@@ -245,9 +246,9 @@ pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &T
 				return false;
 			}
 			if old.is_finite() {
-				eprintln!("Warning: multiple {:?} {:?} bound {} values specified, \
-				           overriding {} with {}",
-				          cfg.severity, cfg.kind, name, old, new);
+				warn!("Multiple {:?} {:?} bound {} values specified, \
+				       overriding {} with {}", cfg.severity, cfg.kind, name,
+				      old, new);
 			}
 			true
 		};

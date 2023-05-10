@@ -10,6 +10,7 @@ use dbus::{
 	nonblock::SyncConnection,
 };
 use tokio::sync::Mutex;
+use log::{info, warn, error};
 
 use crate::{
 	DaemonState,
@@ -388,8 +389,8 @@ impl Sensor {
 			None => {
 				// Presumably unlikely to ever be hit, but I guess this
 				// seems slightly better than just calling .unwrap()...
-				eprintln!("Warning: bogus-looking config inventory path '{}', \
-				           faking parent", cfgpath.0);
+				warn!("Bogus-looking config inventory path '{}', faking parent",
+				      cfgpath.0);
 				std::path::Path::new("/xyz/openbmc_project/inventory/system")
 			},
 		};
@@ -510,8 +511,8 @@ impl Sensor {
 				let mut sensor = sensor.lock().await;
 
 				if !sensor.is_active() {
-					eprintln!("BUG: update task running on inactive sensor {}",
-					          sensor.name);
+					error!("BUG: update task running on inactive sensor {}",
+					       sensor.name);
 					break;
 				}
 
@@ -524,13 +525,13 @@ impl Sensor {
 					},
 					Err(e) => {
 						if sensor.functional.get() {
-							eprintln!("{}: update failed: {}",
-							          sensor.name, e);
+							error!("{}: update failed: {}",
+							       sensor.name, e);
 						}
 						sensor.errcount += 1;
 						if sensor.errcount == MAX_ERRORS {
-							eprintln!("{}: error limit exceeded",
-							          sensor.name);
+							error!("{}: error limit exceeded",
+							       sensor.name);
 							sensor.functional.set(false);
 							sensor.set_value(f64::NAN).await;
 						}
@@ -557,7 +558,7 @@ impl Sensor {
 		// case (and the mirror one in deactivate()) vanished by construction, but
 		// I haven't been able to do so thus far...
 		if sensor.iotask.replace(iotask).is_some() {
-			eprintln!("BUG: re-activating already-active sensor {}", sensor.name);
+			error!("BUG: re-activating already-active sensor {}", sensor.name);
 		}
 
 		sensor.available.set(true)
@@ -566,7 +567,7 @@ impl Sensor {
 	/// Stop a sensor's update task and mark it unavailable.
 	pub async fn deactivate(&mut self) {
 		if !self.is_active() {
-			eprintln!("BUG: deactivating already-inactive sensor {}", self.name);
+			error!("BUG: deactivating already-inactive sensor {}", self.name);
 		}
 
 		// Could just let the old iotask go out of scope, but might as well
@@ -724,8 +725,8 @@ impl ValueIntfMsgFns {
 					match &s.mode {
 						SensorMode::ReadWrite(cb) => cb(s, v),
 						SensorMode::ReadOnly => {
-							eprintln!("BUG: dbus set ReadOnly sensor {}",
-							          s.name);
+							error!("BUG: dbus set ReadOnly sensor {}",
+							       s.name);
 						},
 					};
 				})
@@ -871,45 +872,45 @@ pub async fn instantiate_all(daemonstate: &DaemonState, filter: &FilterSet<Inven
 
 		#[cfg(feature = "adc")]
 		adc::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
-			eprintln!("Failed to instantiate ADC sensors: {}", e);
+			error!("Failed to instantiate ADC sensors: {}", e);
 		});
 
 		#[cfg(feature = "fan")]
 		fan::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
-			eprintln!("Failed to instantiate fan sensors: {}", e);
+			error!("Failed to instantiate fan sensors: {}", e);
 		});
 
 		#[cfg(feature = "peci")]
 		peci::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
-			eprintln!("Failed to instantiate PECI sensors: {}", e);
+			error!("Failed to instantiate PECI sensors: {}", e);
 		});
 
 		#[cfg(feature = "hwmon")]
 		hwmon::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
-			eprintln!("Failed to instantiate hwmon sensors: {}", e);
+			error!("Failed to instantiate hwmon sensors: {}", e);
 		});
 
 		#[cfg(feature = "external")]
 		external::instantiate_sensors(daemonstate, filter, &mut to_retry).await.unwrap_or_else(|e| {
-			eprintln!("Failed to instantiate external sensors: {}", e);
+			error!("Failed to instantiate external sensors: {}", e);
 		});
 
 		attempts += 1;
 
 		if to_retry.is_empty() {
 			if attempts > 1 {
-				eprintln!("All sensors instantiated after {} attempts", attempts);
+				info!("All sensors instantiated after {} attempts", attempts);
 			}
 			break;
 		}
 
 		if attempts == MAX_ATTEMPTS {
-			eprintln!("Instantiation failed after {} attempts for: {:?}", attempts, to_retry);
+			error!("Instantiation failed after {} attempts for: {:?}", attempts, to_retry);
 			break;
 		}
 
-		eprintln!("Waiting {} seconds to retry failed instantiation for: {:?}",
-		          RETRY_WAIT_SECONDS, to_retry);
+		info!("Waiting {} seconds to retry failed instantiation for: {:?}",
+		      RETRY_WAIT_SECONDS, to_retry);
 		retry_filter = FilterSet::from(Some(to_retry));
 		filter = &retry_filter;
 		tokio::time::sleep(Duration::from_secs(3)).await;

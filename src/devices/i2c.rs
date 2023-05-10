@@ -5,6 +5,7 @@ use std::{
 	sync::Arc,
 };
 use phf::{phf_map, phf_set};
+use log::error;
 
 use crate::{
 	types::*,
@@ -298,7 +299,7 @@ impl Drop for I2CDevice {
 		let dtor_path = self.params.sysfs_bus_dir().join("delete_device");
 		let payload = format!("{:#02x}\n", self.params.address);
 		if let Err(e) = std::fs::write(&dtor_path, payload) {
-			eprintln!("Failed to write to {}: {}", dtor_path.display(), e);
+			error!("Failed to write to {}: {}", dtor_path.display(), e);
 		}
 	}
 }

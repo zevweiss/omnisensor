@@ -1,6 +1,7 @@
 //! Assorted utilities for easing dbus usage.
 
 use std::sync::Arc;
+use log::error;
 use dbus::{
 	channel::Sender,
 	nonblock::SyncConnection,
@@ -62,12 +63,12 @@ impl<A: PartialEq + dbus::arg::RefArg> SignalProp<A> {
 	fn send_propchg(&self) {
 		if let Some(msg) = (self.msgfn)(&self.dbuspath.0, &self.data) {
 			if self.conn.send(msg).is_err() {
-				eprintln!("Failed to send PropertiesChanged message for {:?}",
-				          self.dbuspath);
+				error!("Failed to send PropertiesChanged message for {:?}",
+				       self.dbuspath);
 			}
 		} else {
-			eprintln!("Failed to create PropertiesChanged message for {:?}",
-			          self.dbuspath);
+			error!("Failed to create PropertiesChanged message for {:?}",
+			       self.dbuspath);
 		}
 	}
 }

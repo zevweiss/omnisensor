@@ -7,6 +7,7 @@ use std::{
 	sync::Arc,
 	time::Duration,
 };
+use log::error;
 
 use crate::{
 	DaemonState,
@@ -117,8 +118,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			Ok(Some(ioctx)) => ioctx,
 			Ok(None) => continue,
 			Err(e) => {
-				eprintln!("Error preparing {} from {}: {}", adccfg.name,
-				          hwmondir.display(), e);
+				error!("Error preparing {} from {}: {}", adccfg.name,
+				       hwmondir.display(), e);
 				continue;
 			},
 		};

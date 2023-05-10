@@ -3,6 +3,7 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
+use log::error;
 
 use crate::{
 	dbus_helpers::props::*,
@@ -123,7 +124,7 @@ impl Drop for PECIDevice {
 	fn drop(&mut self) {
 		let dtor_path = self.params.sysfs_device_dir().join("remove");
 		if let Err(e) = std::fs::write(&dtor_path, "1") {
-			eprintln!("Failed to write to {}: {}", dtor_path.display(), e);
+			error!("Failed to write to {}: {}", dtor_path.display(), e);
 		}
 	}
 }

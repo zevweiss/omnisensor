@@ -6,6 +6,7 @@ use std::{
 };
 
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use log::{warn, error};
 
 use crate::{
 	gpio,
@@ -145,13 +146,13 @@ pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>)
 				Ok(abspath) => match HwmonFileInfo::from_abspath(abspath) {
 					Ok(f) => Some(f),
 					Err(e) => {
-						eprintln!("Warning: {} (skipping)", e);
+						warn!("{} (skipping)", e);
 						None
 					}
 				},
 				Err(e) => {
-					eprintln!("Warning: error scanning {}, skipping entry: {}",
-					          hwmondir.display(), e);
+					error!("Error scanning {}, skipping entry: {}",
+					       hwmondir.display(), e);
 					None
 				},
 			}

@@ -25,6 +25,7 @@ use dbus::{
 use dbus_crossroads::Crossroads;
 use futures::future;
 use tokio::sync::Mutex;
+use log::error;
 
 mod types;
 mod sensor;
@@ -83,7 +84,7 @@ async fn get_config(bus: &SyncConnection) -> ErrResult<SensorConfigMap> {
 			let cfg = match cfg {
 				Ok(cfg) => cfg,
 				Err(e) => {
-					eprintln!("{:?}, {}: {}", path, k, e);
+					error!("{:?}, {}: {}", path, k, e);
 					continue;
 				},
 			};
@@ -177,7 +178,7 @@ async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Messag
 		} else {
 			// This should be impossible, but try to lessen the
 			// impact if it somehow happens (instead of .expect()-ing)
-			eprintln!("BUG: changed_paths vanished out from under us!");
+			error!("BUG: changed_paths vanished out from under us!");
 			return;
 		}
 	};
@@ -185,8 +186,8 @@ async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Messag
 	let newcfg = match get_config(&daemonstate.bus).await {
 		Ok(c) => c,
 		Err(e) => {
-			eprintln!("Failed to retrieve sensor configs, ignoring PropertiesChanged: {}",
-			          e);
+			error!("Failed to retrieve sensor configs, ignoring PropertiesChanged: {}",
+			       e);
 			return;
 		},
 	};
@@ -198,9 +199,34 @@ async fn handle_propchange(daemonstate: &DaemonState, msg: dbus::message::Messag
 	sensor::instantiate_all(daemonstate, &filter).await;
 }
 
+// Simplistic logging implementation, pretty much duplicated straight out of the
+// log crate's README.
+struct Logger;
+
+const LOGLEVEL: log::Level = log::Level::Info;
+
+impl log::Log for Logger {
+	fn enabled(&self, metadata: &log::Metadata) -> bool {
+		metadata.level() <= LOGLEVEL
+	}
+
+	fn log(&self, record: &log::Record) {
+		if self.enabled(record.metadata()) {
+			eprintln!("{}: {}", record.level(), record.args());
+		}
+	}
+
+	fn flush(&self) {
+	}
+}
+
 /// The entry point of the daemon.
 #[tokio::main]
 async fn main() -> ErrResult<()> {
+	static LOGGER: Logger = Logger;
+	log::set_logger(&LOGGER).unwrap();
+	log::set_max_level(LOGLEVEL.to_level_filter());
+
 	let (bus_resource, bus) = connection::new_system_sync()?;
 	let _handle = tokio::spawn(async {
 		let err = bus_resource.await;

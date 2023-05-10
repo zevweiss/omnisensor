@@ -9,6 +9,7 @@ use std::{
 	time::Duration,
 };
 use dbus::arg::RefArg;
+use log::{debug, error};
 
 use crate::{
 	DaemonState,
@@ -86,7 +87,7 @@ impl HwmonSensorConfig {
 				if let Some(s) = value.as_str() {
 					name_overrides.insert(lbl.into(), s.into());
 				} else {
-					eprintln!("{}: {} value not string, ignored", name, key);
+					error!("{}: {} value not string, ignored", name, key);
 				}
 			}
 		}
@@ -168,8 +169,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		let mainname = &hwmcfg.names[0];
 
 		if !hwmcfg.power_state.active_now() {
-			// FIXME: log noise
-			eprintln!("{}: not active, skipping...", mainname);
+			debug!("{}: not active, skipping...", mainname);
 			continue;
 		}
 
@@ -178,8 +178,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			match get_i2cdev(&mut physdevs, &hwmcfg.i2c) {
 				Ok(d) => d,
 				Err(e) => {
-					eprintln!("{}: i2c device instantiation failed: {}",
-					          mainname, e);
+					error!("{}: i2c device instantiation failed: {}",
+					       mainname, e);
 					retry.insert(path.deref().clone());
 					continue;
 				},
@@ -195,8 +195,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		let inputs = match sysfs::scan_hwmon_input_files(&sysfs_dir, prefix) {
 			Ok(v) => v,
 			Err(e) => {
-				eprintln!("{}: error scanning {}, skipping sensor: {}", mainname,
-				          sysfs_dir.display(), e);
+				error!("{}: error scanning {}, skipping sensor: {}", mainname,
+				       sysfs_dir.display(), e);
 				continue;
 			},
 		};
@@ -205,8 +205,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let label = match file.get_label() {
 				Ok(s) => s,
 				Err(e) => {
-					eprintln!("{}: error finding label for {}, skipping entry: {}",
-					          mainname, file.abspath.display(), e);
+					error!("{}: error finding label for {}, skipping entry: {}",
+					       mainname, file.abspath.display(), e);
 					continue;
 				},
 			};
@@ -216,8 +216,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			}
 
 			let Some(sensorname) = hwmcfg.sensor_name(idx, &label) else {
-				eprintln!("{}: {} does not appear to be in use, skipping",
-				          mainname, label);
+				debug!("{}: {} does not appear to be in use, skipping",
+				       mainname, label);
 				continue;
 			};
 
@@ -231,8 +231,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			let io = match sysfs::SysfsSensorIO::new(file).await {
 				Ok(io) => sensor::SensorIO::Sysfs(io),
 				Err(e) => {
-					eprintln!("{}: skipping {}: {}", sensorname,
-					          file.abspath.display(), e);
+					error!("{}: skipping {}: {}", sensorname,
+					       file.abspath.display(), e);
 					continue;
 				},
 			};

@@ -211,7 +211,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 			for file in inputs {
 				if let Err(e) = instantiate_sensor(daemonstate, path,
-				                                   file, &pecicfg, &physdev).await {
+				                                   file, pecicfg, &physdev).await {
 					eprintln!("{}: skipping {} entry: {}", path.0,
 					          pecicfg.name, e);
 				}

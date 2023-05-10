@@ -896,7 +896,7 @@ pub async fn instantiate_all(daemonstate: &DaemonState, filter: &FilterSet<Inven
 
 		attempts += 1;
 
-		if to_retry.len() == 0 {
+		if to_retry.is_empty() {
 			if attempts > 1 {
 				eprintln!("All sensors instantiated after {} attempts", attempts);
 			}

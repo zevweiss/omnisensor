@@ -133,7 +133,7 @@ async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
 	let ctor = || {
 		Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,
 			    &daemonstate.bus, ReadOnly)
-			.with_power_state(PowerState::On) // FIXME: make configurable?
+			.with_power_state(PowerState::BiosPost)
 			.with_thresholds_from(&cfg.thresholds,
 					      &daemonstate.sensor_intfs.thresholds,
 					      &daemonstate.bus)
@@ -159,8 +159,11 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		});
 
 	// If the host's not on, there's not much for PECI to do, so skip the
-	// (potentially slow) rescan and just return.
-	if !PowerState::On.active_now() {
+	// (potentially slow) rescan and just return.  Experimentally, the PECI
+	// interface starts responding pretty immediately after power-on, but it
+	// takes a while for CPU & DIMM temperature readings to actually become
+	// available, so wait for the POST-complete signal before trying anything.
+	if !PowerState::BiosPost.active_now() {
 		return Ok(());
 	}
 

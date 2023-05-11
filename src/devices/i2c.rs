@@ -5,7 +5,7 @@ use std::{
 	sync::Arc,
 };
 use phf::{phf_map, phf_set};
-use log::error;
+use log::{debug, error};
 
 use crate::{
 	types::*,
@@ -275,10 +275,13 @@ impl I2CDevice {
 			return Ok(dev);
 		}
 
+		let devtype = dev.params.devtype.kernel_type();
+
+		debug!("instantiating {} i2c device {}", devtype, dev.params.sysfs_name());
+
 		// Try to create it: 'echo $devtype $addr > .../i2c-$bus/new_device'
 		let ctor_path = dev.params.sysfs_bus_dir().join("new_device");
-		let payload = format!("{} {:#02x}\n", dev.params.devtype.kernel_type(),
-		                      dev.params.address);
+		let payload = format!("{} {:#02x}\n", devtype, dev.params.address);
 		std::fs::write(&ctor_path, payload)?;
 
 		// Check if that created the requisite sysfs directory
@@ -295,6 +298,8 @@ impl I2CDevice {
 impl Drop for I2CDevice {
 	/// Deletes the I2C device represented by `self` by writing to `delete_device`.
 	fn drop(&mut self) {
+		debug!("removing i2c device {}", self.params.sysfs_name());
+
 		// No params.devicePresent() check on this like in
 		// I2CDevice::new(), since it might be used to clean up after a
 		// device instantiation that was only partially successful

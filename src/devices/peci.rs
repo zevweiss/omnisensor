@@ -3,7 +3,7 @@ use std::{
 	path::{Path, PathBuf},
 	sync::Arc,
 };
-use log::error;
+use log::{debug, error};
 
 use crate::{
 	dbus_helpers::props::*,
@@ -96,6 +96,8 @@ impl PECIDevice {
 			return Ok(dev);
 		}
 
+		debug!("initiating PECI rescan to instantiate {}", dev.params.sysfs_name());
+
 		// Even if rescan() fails there's still some chance it may have
 		// found the device we're concerned with before doing so, so
 		// continue on and check for it even on error...
@@ -122,6 +124,8 @@ impl PECIDevice {
 impl Drop for PECIDevice {
 	/// Deletes the PECI device represented by `self` by writing to its `remove` file.
 	fn drop(&mut self) {
+		debug!("removing PECI device {}", self.params.sysfs_name());
+
 		let dtor_path = self.params.sysfs_device_dir().join("remove");
 		if let Err(e) = std::fs::write(&dtor_path, "1") {
 			error!("Failed to write to {}: {}", dtor_path.display(), e);

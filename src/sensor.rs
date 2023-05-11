@@ -167,6 +167,13 @@ impl SensorConfig {
 		}
 		let cfgtype = parts[3];
 
+		// HACK: reduce log spam a bit by explicitly ignoring some things we're
+		// likely to encounter that look like xyz.openbmc_project.Configuration.*
+		// but aren't sensor configs.
+		if ["BMC", "EEPROM", "FanConnector", "Pid", "Stepwise"].contains(&cfgtype) {
+			return None;
+		}
+
 		#[cfg(feature = "adc")]
 		if adc::match_cfgtype(cfgtype) {
 			return Some(adc::ADCSensorConfig::from_dbus(props, intf, all_intfs)

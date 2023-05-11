@@ -124,18 +124,18 @@ impl HwmonSensorConfig {
 fn name_for_label(label: &str) -> &str {
 	let tag = label.trim_end_matches(|c: char| c.is_ascii_digit());
 	match tag {
-		"pin"          => "Input Power",
-		"pout"|"power" => "Output Power",
-		"maxpin"       => "Max Input Power",
-		"vin"          => "Input Voltage",
-		"maxvin"       => "Max Input Voltage",
-		"vout"|"in"    => "Output Voltage",
-		"vmon"         => "Auxiliary Input Voltage",
-		"iin"          => "Input Current",
-		"iout"|"curr"  => "Output Current",
-		"maxiout"      => "Max Output Current",
-		"temp"         => "Temperature",
-		"maxtemp"      => "Max Temperature",
+		"pin"               => "Input Power",
+		"pout"|"power"      => "Output Power",
+		"maxpin"            => "Max Input Power",
+		"vin"|"vin1"|"vin2" => "Input Voltage",
+		"maxvin"            => "Max Input Voltage",
+		"vout"|"in"         => "Output Voltage",
+		"vmon"              => "Auxiliary Input Voltage",
+		"iin"               => "Input Current",
+		"iout"|"curr"       => "Output Current",
+		"maxiout"           => "Max Output Current",
+		"temp"              => "Temperature",
+		"maxtemp"           => "Max Temperature",
 
 		// PSUSensorMain.cpp in dbus-sensors uses hard-coded
 		// numeric suffixes for these (unlike all the others)

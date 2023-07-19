@@ -46,6 +46,7 @@ static I2C_HWMON_DEVICES: phf::Map<&'static str, bool> = phf_map! {
 	"TMP175"   => true,
 	"TMP421"   => true,
 	"TMP441"   => true,
+	"TMP464"   => true,
 	"TMP75"    => true,
 	"W83773G"  => true,
 };
@@ -63,10 +64,14 @@ static I2C_PMBUS_TYPES: phf::Set<&'static str> = phf_set! {
 	"ADS7830",
 	"AHE50DC_FAN",
 	"BMR490",
+	"CFFPS",
+	"CFFPS1",
+	"CFFPS2",
+	"CFFPS3",
 	"DPS800",
 	"INA219",
 	"INA230",
-	"IPSPS",
+	"IPSPS1",
 	"IR38060",
 	"IR38164",
 	"IR38263",
@@ -101,7 +106,8 @@ static I2C_PMBUS_TYPES: phf::Set<&'static str> = phf_set! {
 	"TPS53679",
 	"TPS546D24",
 	"XDPE11280",
-	"XDPE12284"
+	"XDPE12284",
+	"XDPE152C4",
 };
 
 /// Retrieve an I2CDeviceType for the given device type string.

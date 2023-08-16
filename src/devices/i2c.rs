@@ -81,6 +81,7 @@ static I2C_PMBUS_TYPES: phf::Set<&'static str> = phf_set! {
 	"ISL69225",
 	"ISL69243",
 	"ISL69260",
+	"ISL69269",
 	"LM25066",
 	"MAX16601",
 	"MAX20710",

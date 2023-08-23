@@ -127,7 +127,7 @@ fn name_for_label(label: &str) -> &str {
 		"pin"               => "Input Power",
 		"pout"|"power"      => "Output Power",
 		"maxpin"            => "Max Input Power",
-		"vin"|"vin1"|"vin2" => "Input Voltage",
+		"vin"               => "Input Voltage",
 		"maxvin"            => "Max Input Voltage",
 		"vout"|"in"         => "Output Voltage",
 		"vmon"              => "Auxiliary Input Voltage",

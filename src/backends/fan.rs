@@ -2,12 +2,16 @@
 //!
 //! A la dbus-sensors's `fansensor` daemon.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+	collections::{HashMap, HashSet},
+	path::PathBuf,
+};
 use log::error;
 
 use crate::{
 	DaemonState,
 	dbus_helpers::props::*,
+	devices::i2c,
 	powerstate::PowerState,
 	sensor,
 	sensor::{
@@ -26,29 +30,38 @@ use crate::{
 enum FanSensorType {
 	/// ASPEED AST2x00 fan tach/pwm.
 	AspeedFan,
+
+	/// I2C-attached fan controller.
+	I2CFan(i2c::I2CLocation),
 }
 
-impl TryFrom<&String> for FanSensorType {
-	type Error = Box<dyn std::error::Error>;
-	fn try_from(s: &String) -> ErrResult<Self> {
-		match s.as_ref() {
-			"AspeedFan" => Ok(Self::AspeedFan),
+impl FanSensorType {
+	/// Return a function that can be called on a map of dbus config properties to
+	/// construct a [`FanSensorType`] instance for the given type.
+	fn get_ctor(s: &str) -> ErrResult<fn(&dbus::arg::PropMap) -> ErrResult<Self>> {
+		fn aspeed_ctor(_: &dbus::arg::PropMap) -> ErrResult<FanSensorType> {
+			Ok(FanSensorType::AspeedFan)
+		}
+		fn i2c_ctor(cfg: &dbus::arg::PropMap) -> ErrResult<FanSensorType> {
+			Ok(FanSensorType::I2CFan(i2c::I2CLocation::from_dbus(cfg)?))
+		}
+		match s {
+			"AspeedFan" => Ok(aspeed_ctor),
+			"I2CFan" => Ok(i2c_ctor),
 			_ => Err(err_unsupported(format!("Unsupported fan sensor type '{}'", s))),
 		}
 	}
 }
 
-/// Internal representation of fan sensor config data from dbus.
+/// Fan sensor config parameters common to all sub-types of fan sensors.
 #[derive(Debug)]
-pub struct FanSensorConfig {
+struct FanSensorBaseConfig {
 	/// Index of this particular sensor (channel) within the containing hardware device.
 	index: u64,
 	/// Sensor name.
 	name: String,
 	/// Host power state in which this sensor is active.
 	power_state: PowerState,
-	/// Sub-type of fan sensor.
-	subtype: FanSensorType,
 	/// Threshold settings for the sensor.
 	thresholds: Vec<threshold::ThresholdConfig>,
 	/// Minimum reading value for the sensor.
@@ -57,14 +70,13 @@ pub struct FanSensorConfig {
 	maxreading: f64,
 }
 
-impl FanSensorConfig {
-	/// Construct a [`FanSensorConfig`] from raw dbus config data.
+impl FanSensorBaseConfig {
+	/// Construct a [`FanSensorBaseConfig`] from raw dbus config data.
 	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str,
 	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let index = *prop_get_mandatory(basecfg, "Index")?;
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let power_state = prop_get_default_from(basecfg, "PowerState", PowerState::Always)?;
-		let subtype = prop_get_mandatory_from(basecfg, "Type")?;
 		let thresholds = threshold::get_configs_from_dbus(baseintf, intfs);
 		let minreading = *prop_get_default(basecfg, "MinReading", &0.0f64)?;
 
@@ -75,11 +87,49 @@ impl FanSensorConfig {
 			index,
 			name: name.clone(),
 			power_state,
-			subtype,
 			thresholds,
 			minreading,
 			maxreading,
 		})
+	}
+}
+
+/// Internal representation of fan sensor config data from dbus.
+#[derive(Debug)]
+pub struct FanSensorConfig {
+	/// Sub-type of fan sensor.
+	subtype: FanSensorType,
+	/// Parameters common to all sub-types.
+	common: FanSensorBaseConfig,
+}
+
+impl FanSensorConfig {
+	/// Construct a [`FanSensorConfig`] from raw dbus config data.
+	pub fn from_dbus(basecfg: &dbus::arg::PropMap, baseintf: &str,
+	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
+		let common = FanSensorBaseConfig::from_dbus(basecfg, baseintf, intfs)?;
+		let subtype_str: &String = prop_get_mandatory(basecfg, "Type")?;
+		let subtype_ctor = FanSensorType::get_ctor(subtype_str)?;
+		let subtype = subtype_ctor(basecfg)?;
+
+		Ok(Self {
+			subtype,
+			common,
+		})
+	}
+
+	/// Return the path of a fan sensor's hwmon directory.
+	fn hwmon_dir(&self) -> ErrResult<PathBuf> {
+		let devdir = match &self.subtype {
+			FanSensorType::AspeedFan => {
+				let pattern = format!("{}/*.pwm-tacho-controller", sysfs::PLATFORM_DEVICE_DIR);
+				sysfs::get_single_glob_match(&pattern)?
+			},
+			FanSensorType::I2CFan(loc) =>  {
+				loc.sysfs_device_dir()
+			},
+		};
+		sysfs::get_single_hwmon_dir(&devdir)
 	}
 }
 
@@ -95,11 +145,10 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				_ => None,
 			}
 		});
-	let pattern = format!("{}/*.pwm-tacho-controller", sysfs::PLATFORM_DEVICE_DIR);
-	let controller_dir = sysfs::get_single_glob_match(&pattern)?;
-	let hwmondir = sysfs::get_single_hwmon_dir(&controller_dir)?;
 	for (path, fancfg) in configs {
 		let mut sensors = daemonstate.sensors.lock().await;
+		let hwmondir = fancfg.hwmon_dir()?;
+		let fancfg = &fancfg.common;
 
 		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
 		                                                     fancfg.name.clone()).await else {
@@ -136,5 +185,5 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 /// Whether or not the given `cfgtype` is supported by the `fan` sensor backend.
 pub fn match_cfgtype(cfgtype: &str) -> bool {
-	cfgtype == "AspeedFan"
+	FanSensorType::get_ctor(cfgtype).is_ok()
 }

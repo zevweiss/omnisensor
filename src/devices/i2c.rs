@@ -174,13 +174,47 @@ impl I2CDeviceType {
 	}
 }
 
-/// The information needed to instantiate an I2C device.
+/// The location of an I2C device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct I2CDeviceParams {
+pub struct I2CLocation {
 	/// I2C bus number.
 	pub bus: u16,
 	/// I2C address.
 	pub address: u16,
+}
+
+impl I2CLocation {
+	/// Create an [`I2CLocation`] from a set of dbus properties.
+	pub fn from_dbus(cfg: &dbus::arg::PropMap) -> ErrResult<Self> {
+		let bus: u64 = *prop_get_mandatory(cfg, "Bus")?;
+		let address: u64 = *prop_get_mandatory(cfg, "Address")?;
+		Ok(Self {
+			bus: bus.try_into()?,
+			address: address.try_into()?,
+		})
+	}
+
+	/// Return a device name as employed in sysfs, e.g. `"2-004c"`.
+	pub fn sysfs_name(&self) -> String {
+		format!("{}-{:04x}", self.bus, self.address)
+	}
+
+	/// Return the absolute path of the sysfs directory representing a device at this location.
+	pub fn sysfs_device_dir(&self) -> PathBuf {
+		Path::new(I2C_DEV_DIR).join(self.sysfs_name())
+	}
+
+	/// Return the absolute path of the sysfs directory representing the bus for this location.
+	pub fn sysfs_bus_dir(&self) -> PathBuf {
+		Path::new(I2C_DEV_DIR).join(format!("i2c-{}", self.bus))
+	}
+}
+
+/// The information needed to instantiate an I2C device.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct I2CDeviceParams {
+	/// I2C bus & address.
+	pub loc: I2CLocation,
 	/// Device type.
 	pub devtype: I2CDeviceType,
 }
@@ -191,29 +225,15 @@ const I2C_DEV_DIR: &str = "/sys/bus/i2c/devices";
 impl I2CDeviceParams {
 	/// Create an [`I2CDeviceParams`] from a set of dbus properties and a type string.
 	pub fn from_dbus(cfg: &dbus::arg::PropMap, devtype: I2CDeviceType) -> ErrResult<Self> {
-		let bus: u64 = *prop_get_mandatory(cfg, "Bus")?;
-		let address: u64 = *prop_get_mandatory(cfg, "Address")?;
 		Ok(Self {
-			bus: bus.try_into()?,
-			address: address.try_into()?,
+			loc: I2CLocation::from_dbus(cfg)?,
 			devtype,
 		})
 	}
 
-	/// Return the device name as employed in sysfs, e.g. `"2-004c"`.
-	pub fn sysfs_name(&self) -> String {
-		format!("{}-{:04x}", self.bus, self.address)
-	}
-
 	/// Return the absolute path of the sysfs directory representing the device.
 	pub fn sysfs_device_dir(&self) -> PathBuf {
-		Path::new(I2C_DEV_DIR).join(self.sysfs_name())
-	}
-
-	/// Return the absolute path of the sysfs directory representing the bus via which
-	/// the device is attached.
-	pub fn sysfs_bus_dir(&self) -> PathBuf {
-		Path::new(I2C_DEV_DIR).join(format!("i2c-{}", self.bus))
+		self.loc.sysfs_device_dir()
 	}
 
 	/// Test if the device is currently present, i.e. has had a driver successfully
@@ -284,11 +304,11 @@ impl I2CDevice {
 
 		let devtype = dev.params.devtype.kernel_type();
 
-		debug!("instantiating {} i2c device {}", devtype, dev.params.sysfs_name());
+		debug!("instantiating {} i2c device {}", devtype, dev.params.loc.sysfs_name());
 
 		// Try to create it: 'echo $devtype $addr > .../i2c-$bus/new_device'
-		let ctor_path = dev.params.sysfs_bus_dir().join("new_device");
-		let payload = format!("{} {:#02x}\n", devtype, dev.params.address);
+		let ctor_path = dev.params.loc.sysfs_bus_dir().join("new_device");
+		let payload = format!("{} {:#02x}\n", devtype, dev.params.loc.address);
 		std::fs::write(&ctor_path, payload)?;
 
 		// Check if that created the requisite sysfs directory
@@ -305,15 +325,15 @@ impl I2CDevice {
 impl Drop for I2CDevice {
 	/// Deletes the I2C device represented by `self` by writing to `delete_device`.
 	fn drop(&mut self) {
-		debug!("removing i2c device {}", self.params.sysfs_name());
+		debug!("removing i2c device {}", self.params.loc.sysfs_name());
 
 		// No params.devicePresent() check on this like in
 		// I2CDevice::new(), since it might be used to clean up after a
 		// device instantiation that was only partially successful
 		// (i.e. when params.device_present() would return false but
 		// there's still a dummy i2c client device to remove)
-		let dtor_path = self.params.sysfs_bus_dir().join("delete_device");
-		let payload = format!("{:#02x}\n", self.params.address);
+		let dtor_path = self.params.loc.sysfs_bus_dir().join("delete_device");
+		let payload = format!("{:#02x}\n", self.params.loc.address);
 		if let Err(e) = std::fs::write(&dtor_path, payload) {
 			error!("Failed to write to {}: {}", dtor_path.display(), e);
 		}

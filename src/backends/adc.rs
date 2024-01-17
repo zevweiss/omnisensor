@@ -114,7 +114,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, adccfg.index,
 		                                                     SensorType::Voltage,
 		                                                     adccfg.power_state,
-		                                                     &adccfg.bridge_gpio).await {
+		                                                     &adccfg.bridge_gpio,
+		                                                     daemonstate).await {
 			Ok(Some(ioctx)) => ioctx,
 			Ok(None) => continue,
 			Err(e) => {

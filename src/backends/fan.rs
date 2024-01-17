@@ -51,6 +51,13 @@ impl FanSensorType {
 			_ => Err(err_unsupported(format!("Unsupported fan sensor type '{}'", s))),
 		}
 	}
+
+	fn get_i2c_bus(&self) -> Option<u16> {
+		match self {
+			Self::I2CFan(loc) => Some(loc.bus),
+			_ => None,
+		}
+	}
 }
 
 /// Fan sensor config parameters common to all sub-types of fan sensors.
@@ -131,6 +138,10 @@ impl FanSensorConfig {
 		};
 		sysfs::get_single_hwmon_dir(&devdir)
 	}
+
+	pub fn get_i2c_bus(&self) -> Option<u16> {
+		self.subtype.get_i2c_bus()
+	}
 }
 
 /// Instantiate any active fan sensors configured in `daemonstate.config`.
@@ -148,6 +159,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 	for (path, fancfg) in configs {
 		let mut sensors = daemonstate.sensors.lock().await;
 		let hwmondir = fancfg.hwmon_dir()?;
+		let i2c_bus = fancfg.get_i2c_bus();
 		let fancfg = &fancfg.common;
 
 		let Some(entry) = sensor::get_nonactive_sensor_entry(&mut sensors,
@@ -157,7 +169,8 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 		let ioctx = match sysfs::prepare_indexed_hwmon_ioctx(&hwmondir, fancfg.index,
 		                                                     SensorType::RPM,
-		                                                     fancfg.power_state, &None).await {
+		                                                     fancfg.power_state, &None,
+		                                                     daemonstate).await {
 			Ok(Some(ioctx)) => ioctx,
 			Ok(None) => continue,
 			Err(e) => {
@@ -176,6 +189,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				                      &daemonstate.bus)
 				.with_minval(fancfg.minreading)
 				.with_maxval(fancfg.maxreading)
+				.with_i2c_bus(i2c_bus)
 		};
 		sensor::install_or_activate(entry, &daemonstate.crossroads, ioctx,
 		                            &daemonstate.sensor_intfs, ctor).await;

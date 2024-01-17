@@ -143,6 +143,8 @@ pub struct DaemonState {
 	crossroads: SyncMutex<dbus_crossroads::Crossroads>,
 	/// Sensor dbus interface metadata.
 	sensor_intfs: SensorIntfData,
+	/// Global poll interval overriding E-M config
+	force_poll_interval: Option<Duration>,
 }
 
 /// A helper function for handling dbus `PropertiesChanged` signals.
@@ -227,6 +229,13 @@ async fn main() -> ErrResult<()> {
 	log::set_logger(&LOGGER).unwrap();
 	log::set_max_level(LOGLEVEL.to_level_filter());
 
+	let force_poll_interval = if let Some(arg) = std::env::args().nth(1) {
+		let x: f32 = arg.parse()?;
+		Some(Duration::from_secs_f32(x))
+	} else {
+		None
+	};
+
 	let (bus_resource, bus) = connection::new_system_sync()?;
 	let _handle = tokio::spawn(async {
 		let err = bus_resource.await;
@@ -258,6 +267,7 @@ async fn main() -> ErrResult<()> {
 		bus,
 		crossroads: SyncMutex::new(cr),
 		sensor_intfs,
+		force_poll_interval,
 	};
 
 	// HACK: leak this into a pseudo-global to satisfy callback lifetime requirements
@@ -296,6 +306,24 @@ async fn main() -> ErrResult<()> {
 	if reply != RequestNameReply::PrimaryOwner {
 		let msg = format!("Failed to acquire dbus name {}: {:?}", DBUS_NAME, reply);
 		return Err(err_other(msg));
+	}
+
+	if let Some(sleeptime) = force_poll_interval {
+		tokio::spawn(async move {
+			loop {
+				tokio::time::sleep(sleeptime).await;
+				let sensors = daemonstate.sensors.lock().await;
+				let mut tmp = Vec::with_capacity(sensors.len());
+				for s in sensors.values() {
+					let s = s.lock().await;
+					tmp.push(s);
+				}
+				tmp.sort_by_key(|s| s.i2c_bus);
+				for s in tmp {
+					s.trigger_update();
+				}
+			}
+		});
 	}
 
 	println!("Hello, world!");

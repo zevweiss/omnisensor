@@ -9,7 +9,7 @@ use dbus::{
 	arg::{Arg, RefArg, Append, PropMap},
 	nonblock::SyncConnection,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use log::{info, warn, error};
 
 use crate::{
@@ -248,6 +248,8 @@ pub struct SensorIOCtx {
 	physdev: Option<Arc<PhysicalDevice>>,
 	/// Function returning a future to await before performing an update of the sensor's value.
 	next_update: NextUpdateFn,
+	/// Channel for triggering updates in forced poll-interval mode
+	trigger_update: Option<watch::Sender<()>>,
 }
 
 /// A running task that updates a sensor's value.
@@ -264,13 +266,28 @@ impl Drop for SensorIOTask {
 
 impl SensorIOCtx {
 	/// Create a new sensor I/O context from a given I/O mechanism.
-	pub fn new(io: SensorIO) -> Self {
-		Self {
+	pub fn new(io: SensorIO, daemonstate: &DaemonState) -> Self {
+		let (trigger_tx, trigger_rx) = daemonstate.force_poll_interval
+			.map(|_| watch::channel(()))
+			.unzip();
+		let mut ctx = Self {
 			io,
 			bridge_gpio: None,
 			physdev: None,
 			next_update: Box::new(|s| Box::pin(tokio::time::sleep(s.poll_interval))),
-		}
+			trigger_update: trigger_tx,
+		};
+		if let Some(rx) = trigger_rx {
+			// FIXME: any way to avoid the Arc<Mutex<_>> overhead here?
+			let rx = Arc::new(Mutex::new(rx));
+			ctx.next_update = Box::new(move |_| {
+				let rx = rx.clone();
+				Box::pin(async move {
+					rx.lock().await.changed().await.unwrap();
+				})
+			});
+		};
+		ctx
 	}
 
 	/// Add a [`BridgeGPIO`] to a sensor I/O context.
@@ -361,6 +378,11 @@ pub struct Sensor {
 	/// (e.g. when the host's current power state doesn't match the sensor's
 	/// `power_state`).
 	iotask: Option<SensorIOTask>,
+
+	/// Channel to send a `()` over to trigger an update (for forced-poll-interval mode)
+	update_trigger: Option<watch::Sender<()>>,
+
+	pub i2c_bus: Option<u16>,
 }
 
 /// The number of consecutive update errors after which a sensor's
@@ -425,6 +447,8 @@ impl Sensor {
 			mode,
 
 			iotask: None,
+			update_trigger: None,
+			i2c_bus: None,
 		}
 	}
 
@@ -474,6 +498,11 @@ impl Sensor {
 		self
 	}
 
+	pub fn with_i2c_bus(mut self, i2c_bus: Option<u16>) -> Self {
+		self.i2c_bus = i2c_bus;
+		self
+	}
+
 	/// Set the sensor's [`cache`](Sensor::cache)d value and update the state of its
 	/// [`thresholds`](Sensor::thresholds).
 	async fn set_value(&mut self, newval: f64) {
@@ -501,6 +530,8 @@ impl Sensor {
 		// strong reference to the sensor (which would create a reference loop and
 		// make it un-droppable)
 		let weakref = Arc::downgrade(sensor);
+
+		let update_trigger = ioctx.trigger_update.take();
 
 		let update_loop = async move {
 			loop {
@@ -573,6 +604,7 @@ impl Sensor {
 			error!("BUG: re-activating already-active sensor {}", sensor.name);
 		}
 
+		sensor.update_trigger = update_trigger;
 		sensor.available.set(true)
 	}
 
@@ -609,6 +641,14 @@ impl Sensor {
 			}
 		}
 		cr.lock().unwrap().insert(self.dbuspath.0.clone(), &ifaces, cbdata.clone());
+	}
+
+	pub fn trigger_update(&self) -> Option<bool> {
+		if let Some(tx) = &self.update_trigger {
+			Some(tx.send(()).is_ok())
+		} else {
+			None
+		}
 	}
 }
 

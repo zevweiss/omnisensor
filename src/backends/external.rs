@@ -172,7 +172,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 
 		let io = sensor::SensorIO::External(extio);
 
-		let ioctx = sensor::SensorIOCtx::new(io)
+		let ioctx = sensor::SensorIOCtx::new(io, daemonstate)
 			.with_next_update(Box::new(move |_| {
 				let extiocore = extiocore.clone();
 				Box::pin(async move {

@@ -129,7 +129,7 @@ async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
 		},
 	};
 
-	let io = SensorIOCtx::new(io).with_physdev(Some(physdev.clone()));
+	let io = SensorIOCtx::new(io, daemonstate).with_physdev(Some(physdev.clone()));
 
 	let ctor = || {
 		Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,

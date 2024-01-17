@@ -9,6 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use log::{warn, error};
 
 use crate::{
+	DaemonState,
 	gpio,
 	powerstate::PowerState,
 	sensor::{SensorIO, SensorIOCtx, SensorType},
@@ -172,7 +173,8 @@ pub fn scan_hwmon_input_files(devdir: &Path, fileprefix: Option<&str>)
 /// nothing further to do), and otherwise `Ok(Some(_))` on success or `Err(_)` on failure.
 pub async fn prepare_indexed_hwmon_ioctx(hwmondir: &Path, idx: u64, kind: SensorType,
                                          power_state: PowerState,
-                                         bridge_gpio_cfg: &Option<Arc<gpio::BridgeGPIOConfig>>)
+                                         bridge_gpio_cfg: &Option<Arc<gpio::BridgeGPIOConfig>>,
+                                         daemonstate: &DaemonState)
                                          -> ErrResult<Option<SensorIOCtx>>
 {
 	if !power_state.active_now() {
@@ -186,7 +188,7 @@ pub async fn prepare_indexed_hwmon_ioctx(hwmondir: &Path, idx: u64, kind: Sensor
 		None => None,
 	};
 	let io = SensorIO::Sysfs(SysfsSensorIO::new(&file).await?);
-	Ok(Some(SensorIOCtx::new(io).with_bridge_gpio(bridge_gpio)))
+	Ok(Some(SensorIOCtx::new(io, daemonstate).with_bridge_gpio(bridge_gpio)))
 }
 
 /// Information for reading sensor data from sysfs.

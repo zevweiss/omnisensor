@@ -246,7 +246,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				SensorType::Power => (0.0, 3000.0),
 			};
 
-			let io = SensorIOCtx::new(io).with_physdev(physdev.clone());
+			let io = SensorIOCtx::new(io, daemonstate).with_physdev(physdev.clone());
 
 			let ctor = || {
 				Sensor::new(path, &sensorname, file.kind, &daemonstate.sensor_intfs,
@@ -258,6 +258,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 					                      &daemonstate.bus)
 					.with_minval(minval)
 					.with_maxval(maxval)
+					.with_i2c_bus(Some(hwmcfg.i2c.loc.bus))
 			};
 			sensor::install_or_activate(entry, &daemonstate.crossroads, io,
 			                            &daemonstate.sensor_intfs, ctor).await;

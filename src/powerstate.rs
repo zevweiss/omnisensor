@@ -126,7 +126,7 @@ pub mod host_state {
 
 		/// Host chassis power state.
 		pub const CHASSIS: DBusPowerStateProperty = DBusPowerStateProperty {
-			busname: "xyz.openbmc_project.State.Chassis",
+			busname: "xyz.openbmc_project.State.Chassis0",
 			path: "/xyz/openbmc_project/state/chassis0",
 			interface: "xyz.openbmc_project.State.Chassis",
 			property: "CurrentPowerState",
@@ -138,7 +138,7 @@ pub mod host_state {
 
 		/// Host system power state.
 		pub const POWER: DBusPowerStateProperty = DBusPowerStateProperty {
-			busname: "xyz.openbmc_project.State.Host",
+			busname: "xyz.openbmc_project.State.Host0",
 			path: "/xyz/openbmc_project/state/host0",
 			interface: "xyz.openbmc_project.State.Host",
 			property: "CurrentHostState",
@@ -154,8 +154,8 @@ pub mod host_state {
 
 		/// Host POST state.
 		pub const POST: DBusPowerStateProperty = DBusPowerStateProperty {
-			busname: "xyz.openbmc_project.State.OperatingSystem",
-			path: "/xyz/openbmc_project/state/os",
+			busname: "xyz.openbmc_project.State.Host0",
+			path: "/xyz/openbmc_project/state/host0",
 			interface: "xyz.openbmc_project.State.OperatingSystem.Status",
 			property: "OperatingSystemState",
 

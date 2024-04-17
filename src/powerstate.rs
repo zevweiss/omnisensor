@@ -1,7 +1,7 @@
 //! Utility code for sensor power-state attributes and host power state monitoring.
 
 use crate::types::*;
-use log::error;
+use log::{debug, error};
 
 /// Represents a setting of a sensor indicating in which host power states it is enabled.
 #[derive(Debug, Copy, Clone)]
@@ -213,14 +213,20 @@ pub mod host_state {
 				.with_path(prop.path);
 			let (signal, stream) = bus.add_match(rule).await?.stream();
 			let handler = move |(_, (intf, props)): (_, (String, dbus::arg::PropMap))| {
+				debug!("outer power signal handler called for path {} intf {} prop {}",
+				       prop.path, prop.interface, prop.property);
 				async move {
 					if intf != prop.interface {
-						return; // FIXME: log?
+						debug!("outer power handler: {} != {}, skipping inner handler",
+						       intf, prop.interface);
+						return;
 					}
 
 					let Some(newstate) = dbus::arg::prop_cast::<String>(&props,
 					                                                    prop.property)
 						.map(|s| (prop.is_active)(s)) else {
+							debug!("outer power handler: prop_cast failed? ({:?})",
+							       props);
 							return;
 						};
 

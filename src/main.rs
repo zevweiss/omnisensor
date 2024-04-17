@@ -25,7 +25,7 @@ use dbus::{
 use dbus_crossroads::Crossroads;
 use futures::future;
 use tokio::sync::Mutex;
-use log::error;
+use log::{debug, error};
 
 mod types;
 mod sensor;
@@ -267,6 +267,7 @@ async fn main() -> ErrResult<()> {
 	#[cfg(feature = "hostpower")]
 	let _powersignals = {
 		let powerhandler = move |_kind, newstate| async move {
+			debug!("powerhandler: {:?}={}", _kind, newstate);
 			if newstate {
 				sensor::instantiate_all(daemonstate, &FilterSet::All).await;
 			} else {

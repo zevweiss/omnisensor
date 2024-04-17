@@ -233,6 +233,8 @@ async fn main() -> ErrResult<()> {
 		panic!("Lost connection to D-Bus: {}", err);
 	});
 
+	bus.set_signal_match_mode(true);
+
 	let mut cr = Crossroads::new();
 	cr.set_async_support(Some((bus.clone(), Box::new(|x| { tokio::spawn(x); }))));
 	cr.set_object_manager_support(Some(bus.clone()));

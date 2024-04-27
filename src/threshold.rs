@@ -240,12 +240,17 @@ impl Threshold {
 pub type ThresholdArr = ThresholdSeverityArray<Option<Threshold>>;
 
 /// Construct a [`ThresholdArr`] from a slice of config objects.
-pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], threshold_intfs: &ThresholdIntfDataArr,
+pub fn get_thresholds_from_configs(cfgs: &[ThresholdConfig], index: Option<usize>,
+                                   threshold_intfs: &ThresholdIntfDataArr,
                                    dbuspath: &Arc<SensorPath>, conn: &Arc<SyncConnection>)
                                    -> ThresholdArr
 {
 	let mut thresholds = ThresholdArr::default();
 	for cfg in cfgs {
+		match (index, cfg.index) {
+			(Some(x), Some(y)) if x != y => continue,
+			_ => (),
+		};
 		let intf = &threshold_intfs[cfg.severity as usize];
 		let Ok(bounds) = ThresholdBoundType::iter()
 			.map(|t| ThresholdBound::new(&intf.msgfns.bounds[t as usize], dbuspath, conn))

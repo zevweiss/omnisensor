@@ -130,7 +130,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				.with_poll_interval(adccfg.poll_interval)
 				.with_scale(adccfg.scale)
 				.with_power_state(adccfg.power_state)
-				.with_thresholds_from(&adccfg.thresholds,
+				.with_thresholds_from(&adccfg.thresholds, None,
 				                      &daemonstate.sensor_intfs.thresholds,
 				                      &daemonstate.bus)
 				.with_minval(0.0)

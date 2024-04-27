@@ -444,10 +444,14 @@ impl Sensor {
 	///
 	/// The thresholds are constructed from the provided config data, interfaces, and
 	/// dbus connection.
-	pub fn with_thresholds_from(mut self, cfg: &[ThresholdConfig],
+	///
+	/// If `index` is not `None`, entries in `cfg` with a non-`None` `index` value
+	/// that differs from it are ignored.
+	pub fn with_thresholds_from(mut self, cfg: &[ThresholdConfig], index: Option<usize>,
 	                            threshold_intfs: &ThresholdIntfDataArr,
 	                            conn: &Arc<SyncConnection>) -> Self {
-		self.thresholds = threshold::get_thresholds_from_configs(cfg, threshold_intfs,
+		self.thresholds = threshold::get_thresholds_from_configs(cfg, index,
+		                                                         threshold_intfs,
 		                                                         &self.dbuspath, conn);
 		self
 	}

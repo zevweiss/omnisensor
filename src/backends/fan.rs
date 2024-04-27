@@ -171,7 +171,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			Sensor::new(path,&fancfg.name, SensorType::RPM, &daemonstate.sensor_intfs,
 			            &daemonstate.bus, ReadOnly)
 				.with_power_state(fancfg.power_state)
-				.with_thresholds_from(&fancfg.thresholds,
+				.with_thresholds_from(&fancfg.thresholds, None,
 				                      &daemonstate.sensor_intfs.thresholds,
 				                      &daemonstate.bus)
 				.with_minval(fancfg.minreading)

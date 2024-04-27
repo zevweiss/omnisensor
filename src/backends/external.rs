@@ -190,7 +190,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 			Sensor::new(path, &extcfg.name, extcfg.kind, &daemonstate.sensor_intfs,
 			            &daemonstate.bus, mode)
 				.with_power_state(extcfg.power_state)
-				.with_thresholds_from(&extcfg.thresholds,
+				.with_thresholds_from(&extcfg.thresholds, None,
 				                      &daemonstate.sensor_intfs.thresholds,
 				                      &daemonstate.bus)
 				.with_minval(extcfg.minvalue)

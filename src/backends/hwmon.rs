@@ -253,7 +253,7 @@ pub async fn instantiate_sensors(daemonstate: &DaemonState, dbuspaths: &FilterSe
 				            &daemonstate.bus, ReadOnly)
 					.with_poll_interval(hwmcfg.poll_interval)
 					.with_power_state(hwmcfg.power_state)
-					.with_thresholds_from(&hwmcfg.thresholds,
+					.with_thresholds_from(&hwmcfg.thresholds, Some(idx + 1),
 					                      &daemonstate.sensor_intfs.thresholds,
 					                      &daemonstate.bus)
 					.with_minval(minval)

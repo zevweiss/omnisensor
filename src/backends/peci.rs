@@ -135,7 +135,7 @@ async fn instantiate_sensor(daemonstate: &DaemonState, path: &InventoryPath,
 		Sensor::new(path, &name, file.kind, &daemonstate.sensor_intfs,
 			    &daemonstate.bus, ReadOnly)
 			.with_power_state(PowerState::BiosPost)
-			.with_thresholds_from(&cfg.thresholds,
+			.with_thresholds_from(&cfg.thresholds, None,
 					      &daemonstate.sensor_intfs.thresholds,
 					      &daemonstate.bus)
 			.with_minval(-128.0)

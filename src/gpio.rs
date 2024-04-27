@@ -105,7 +105,7 @@ impl BridgeGPIO {
 		if self.active {
 			return Err(err_other("GPIO activation already held"));
 		}
-		self.req.set_value(self.line.offset, gpiocdev::line::Value::Active)?;
+		self.req.set_value(self.line.info.offset, gpiocdev::line::Value::Active)?;
 		tokio::time::sleep(self.cfg.setup_time).await;
 		self.active = true;
 		Ok(BridgeGPIOActivation {
@@ -117,7 +117,7 @@ impl BridgeGPIO {
 impl Drop for BridgeGPIOActivation<'_> {
 	/// Resets the associated [`BridgeGPIO`] back to its inactive state.
 	fn drop(&mut self) {
-		if let Err(e) = self.gpio.req.set_value(self.gpio.line.offset,
+		if let Err(e) = self.gpio.req.set_value(self.gpio.line.info.offset,
 		                                        gpiocdev::line::Value::Inactive) {
 			error!("failed to reset bridge gpio {}: {}", self.gpio.cfg.name, e);
 		}

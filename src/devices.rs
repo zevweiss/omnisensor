@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 /// An object representing a dynamically-managed underlying device providing one
 /// or more sensors.
+#[allow(clippy::upper_case_acronyms)]
 pub enum PhysicalDevice {
 	/// An I2C device, managed via the `new_device` and
 	/// `delete_device` operations of its parent bus.

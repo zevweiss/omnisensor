@@ -325,7 +325,7 @@ impl I2CDevice {
 		// Try to create it: 'echo $devtype $addr > .../i2c-$bus/new_device'
 		let ctor_path = dev.params.loc.sysfs_bus_dir().join("new_device");
 		let payload = format!("{} {:#02x}\n", devtype, dev.params.loc.address);
-		std::fs::write(&ctor_path, payload)?;
+		std::fs::write(ctor_path, payload)?;
 
 		// Check if that created the requisite sysfs directory
 		if dev.params.device_present() {

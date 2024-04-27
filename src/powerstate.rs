@@ -243,7 +243,7 @@ pub mod host_state {
 			};
 			let stream = stream.for_each(handler);
 			signals.push(signal);
-			tokio::spawn(async { stream.await });
+			tokio::spawn(stream);
 		}
 
 		Ok(signals)

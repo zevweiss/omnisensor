@@ -45,6 +45,7 @@ use crate::backends::external;
 
 /// The type of a sensor.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum SensorType {
 	Temperature,
 	RPM,
@@ -129,6 +130,7 @@ impl SensorType {
 }
 
 /// An enum of config data all supported sensor types.
+#[allow(clippy::upper_case_acronyms)]
 pub enum SensorConfig {
 	#[cfg(feature = "hwmon")]
 	Hwmon(hwmon::HwmonSensorConfig),
@@ -204,8 +206,7 @@ impl SensorConfig {
 			            .map(SensorConfig::External));
 		}
 
-		return Some(Err(err_unsupported(format!("unsupported Configuration type '{}'",
-		                                        cfgtype))));
+		Some(Err(err_unsupported(format!("unsupported Configuration type '{}'", cfgtype))))
 	}
 }
 

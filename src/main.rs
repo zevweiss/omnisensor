@@ -124,7 +124,7 @@ where H: FnOnce(dbus::message::Message, String,
 		}
 	});
 
-	tokio::spawn(async { stream.await });
+	tokio::spawn(stream);
 
 	Ok(signal)
 }

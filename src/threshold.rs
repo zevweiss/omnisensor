@@ -114,6 +114,7 @@ pub struct ThresholdConfig {
 	/// reset the alarm status.
 	hysteresis: f64,
 	value: f64,
+	index: Option<usize>,
 }
 
 impl ThresholdConfig {
@@ -124,6 +125,20 @@ impl ThresholdConfig {
 		let value = *prop_get_mandatory::<f64>(props, "Value")?;
 		let hysteresis = *prop_get_default::<f64>(props, "Hysteresis", &0.0f64)?;
 
+		// Index is, of course, naturally an (unsigned) integer, but for some
+		// screwball reason it's on dbus as a float (dbus type 'd').  To make sure
+		// it isn't something too wacky, ensure its float value is exactly equal
+		// to the integer we're turning it into.
+		let index = match prop_get_optional::<f64>(props, "Index")?.copied() {
+			Some(f) => {
+				if !f.is_finite() || f < 0.0 || f != (f as usize) as f64 {
+					return Err(err_invalid_data(format!("Invalid 'Index' value {}", f)));
+				}
+				Some(f as usize)
+			},
+			None => None,
+		};
+
 		if !value.is_finite() {
 			return Err(err_invalid_data("Threshold value must be finite"));
 		}
@@ -133,6 +148,7 @@ impl ThresholdConfig {
 			severity,
 			value,
 			hysteresis,
+			index,
 		})
 	}
 }

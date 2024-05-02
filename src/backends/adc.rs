@@ -60,7 +60,7 @@ impl ADCSensorConfig {
 	                 intfs: &HashMap<String, dbus::arg::PropMap>) -> ErrResult<Self> {
 		let name: &String = prop_get_mandatory(basecfg, "Name")?;
 		let index: u64 = *prop_get_mandatory(basecfg, "Index")?;
-		let poll_sec: u64 = *prop_get_default(basecfg, "PollRate", &1u64)?;
+		let poll_sec: f64 = prop_get_default_num(basecfg, "PollRate", 1.0)?;
 		let scale: f64 = *prop_get_default(basecfg, "ScaleFactor", &1.0f64)?;
 		let power_state = prop_get_default_from(basecfg, "PowerState", PowerState::Always)?;
 		let bridge_gpio = match intfs.get(BRIDGE_GPIO_CONFIG_INTF) {
@@ -78,7 +78,7 @@ impl ADCSensorConfig {
 		Ok(Self {
 			name: name.clone(),
 			index,
-			poll_interval: Duration::from_secs(poll_sec),
+			poll_interval: Duration::from_secs_f64(poll_sec),
 			scale: 1.0 / scale, // convert to a multiplier
 			power_state,
 			thresholds,

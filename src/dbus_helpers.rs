@@ -164,4 +164,43 @@ pub mod props {
 			Err(e) => Err(e),
 		}
 	}
+
+	/// A special case of [`prop_get_default()`] for inconsistently-typed numeric
+	/// values.
+	///
+	/// An unfortunate aspect of entity-manager is that some numerically-valued
+	/// properties (`PollRate`, for example) aren't always the same type, sometimes
+	/// presented as a u64 (the dbus `t` type) and sometimes as an f64 (the dbus `d`
+	/// type).  This papers over the inconsistency by first trying to find a float but
+	/// falling back to checking for a uint and converting it into a float if that
+	/// fails.
+	pub fn prop_get_default_num(map: &PropMap, key: &str, default: f64) -> ErrResult<f64> {
+		match prop_get_default::<f64>(map, key, &default) {
+			r @ Ok(_) => r.copied(),
+			e @ Err(_) => {
+				let idef = default as u64;
+				match prop_get_default::<u64>(map, key, &idef) {
+					Ok(u) => {
+						let f = *u as f64;
+						// we're probably pretty unlikely to see
+						// integer values that can't be exactly
+						// represented as an f64, but let's make
+						// absolutely sure and fail if it can't.
+						if f as u64 == *u {
+							Ok(f)
+						} else {
+							let m = format!("uint value {} for '{}' \
+							                 not representable as f64",
+							                *u, key);
+							Err(err_invalid_data(m))
+						}
+					}
+
+					// return the original error (from the float
+					// retrieval attempt) if both float and int fail.
+					Err(_) => e.copied(),
+				}
+			},
+		}
+	}
 }
